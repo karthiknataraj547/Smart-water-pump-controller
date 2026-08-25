@@ -10,10 +10,10 @@ interface AuthModalProps {
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const { login, register } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
-  const [email, setEmail] = useState('admin@waterpump.io');
-  const [password, setPassword] = useState('Admin@123456');
-  const [name, setName] = useState('Chief Operator');
-  const [phone, setPhone] = useState('+1-800-555-PUMP');
+  const [email, setEmail] = useState('user@waterpump.io');
+  const [password, setPassword] = useState('User@123456');
+  const [name, setName] = useState('Station Operator');
+  const [phone, setPhone] = useState('+1-800-555-USER');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -36,6 +36,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDemoUser = () => {
+    setEmail('user@waterpump.io');
+    setPassword('User@123456');
+    setIsRegister(false);
   };
 
   const handleDemoAdmin = () => {
@@ -147,13 +153,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         </form>
 
         <div className="mt-6 pt-4 border-t border-slate-700/20 flex flex-col items-center space-y-2 text-xs">
-          <button
-            type="button"
-            onClick={handleDemoAdmin}
-            className="text-cyan-400 font-mono font-bold hover:underline cursor-pointer"
-          >
-            Quick Fill Demo Admin Credentials
-          </button>
+          <div className="flex items-center space-x-3 text-xs font-mono">
+            <button
+              type="button"
+              onClick={handleDemoUser}
+              className="text-cyan-400 font-bold hover:underline cursor-pointer"
+            >
+              Fill Operator Login
+            </button>
+            <span className="text-slate-600">|</span>
+            <button
+              type="button"
+              onClick={handleDemoAdmin}
+              className="text-amber-400 font-bold hover:underline cursor-pointer"
+            >
+              Fill Admin Login
+            </button>
+          </div>
 
           <button
             type="button"

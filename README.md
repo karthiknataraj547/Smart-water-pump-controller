@@ -73,9 +73,16 @@ npm start
 ```
 *Simulates real-time water drawdown, pumping fill, and MQTT packet exchange.*
 
-### 4. Default Operator Credentials
-- **Email**: `admin@waterpump.io`
-- **Password**: `Admin@123456`
+### 4. Default Authentication Credentials
+- **Standard User / Station Operator**:
+  - **Email**: `user@waterpump.io`
+  - **Password**: `User@123456`
+  - **Portal URL**: `http://localhost:3000/`
+- **System Administrator**:
+  - **Email**: `admin@waterpump.io`
+  - **Password**: `Admin@123456`
+  - **Security PIN**: `9921`
+  - **Admin Command Portal**: `http://localhost:3000/admin`
 
 ---
 

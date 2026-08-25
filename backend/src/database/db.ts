@@ -114,22 +114,41 @@ export class DBManager {
   }
 
   private async seedInitialData(): Promise<void> {
+    // 1. Seed Default Administrator Account if not present
     const existingAdmin = await this.queryOne<any>('SELECT * FROM users WHERE email = ?', ['admin@waterpump.io']);
+    let adminId = existingAdmin?.id;
     if (!existingAdmin) {
-      console.log('[DB] Seeding default administrator and test controller...');
-      const adminId = uuidv4();
-      const passHash = bcrypt.hashSync('Admin@123456', 10);
+      console.log('[DB] Seeding default administrator (admin@waterpump.io)...');
+      adminId = uuidv4();
+      const adminPassHash = bcrypt.hashSync('Admin@123456', 10);
       await this.execute(
         'INSERT INTO users (id, name, email, phone, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime("now"))',
-        [adminId, 'Chief IoT Operator', 'admin@waterpump.io', '+1-800-555-PUMP', passHash, 'admin', 'active']
+        [adminId, 'Chief IoT Operator', 'admin@waterpump.io', '+1-800-555-PUMP', adminPassHash, 'admin', 'active']
       );
+    }
 
+    // 2. Seed Default Standard User / Operator Account if not present
+    const existingUser = await this.queryOne<any>('SELECT * FROM users WHERE email = ?', ['user@waterpump.io']);
+    if (!existingUser) {
+      console.log('[DB] Seeding default station operator user (user@waterpump.io)...');
+      const userId = uuidv4();
+      const userPassHash = bcrypt.hashSync('User@123456', 10);
+      await this.execute(
+        'INSERT INTO users (id, name, email, phone, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime("now"))',
+        [userId, 'Station Operator', 'user@waterpump.io', '+1-800-555-USER', userPassHash, 'operator', 'active']
+      );
+    }
+
+    // 3. Seed Default Device & Nodes if not present
+    const existingDevice = await this.queryOne<any>('SELECT * FROM devices WHERE device_uid = ?', ['WPC-A81F29']);
+    if (!existingDevice) {
+      console.log('[DB] Seeding default controller device and nodes...');
       const deviceId = uuidv4();
       const deviceUid = 'WPC-A81F29';
       await this.execute(
         `INSERT INTO devices (id, device_uid, serial_number, device_type, owner_id, status, firmware_version, local_ip, mac_address, tank_capacity_liters, tank_height_cm, last_seen, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [deviceId, deviceUid, 'SN-2026-ESP32-9921', 'ESP32_MAIN_CONTROLLER', adminId, 'online', 'v1.4.2', '192.168.1.145', '24:6F:28:A8:1F:29', 2000.0, 180.0]
+        [deviceId, deviceUid, 'SN-2026-ESP32-9921', 'ESP32_MAIN_CONTROLLER', adminId, 'online', 'v2.1.0', '192.168.31.54', '24:6F:28:A8:1F:29', 2000.0, 180.0]
       );
 
       const subnodeId = uuidv4();
