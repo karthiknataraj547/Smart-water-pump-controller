@@ -1,4 +1,19 @@
-const API_BASE = '/api/v1';
+function getApiBaseUrl(): string {
+  if (typeof window === 'undefined') return 'http://localhost:5000/api/v1';
+  
+  const metaEnv = (import.meta as any)?.env;
+  if (metaEnv?.VITE_API_URL) {
+    return metaEnv.VITE_API_URL.replace(/\/$/, '') + '/api/v1';
+  }
+
+  const isDev = Boolean(metaEnv?.DEV);
+  if (!isDev) {
+    const host = window.location.hostname || 'localhost';
+    return `http://${host}:5000/api/v1`;
+  }
+
+  return '/api/v1';
+}
 
 export class ApiService {
   private static getToken(): string | null {
@@ -16,12 +31,26 @@ export class ApiService {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      headers
-    });
+    const baseUrl = getApiBaseUrl();
+    const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
 
-    const data = await response.json();
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers
+      });
+    } catch (networkErr: any) {
+      throw new Error(`Cannot connect to IoT Gateway Server. Please ensure the backend is running at ${baseUrl}`);
+    }
+
+    const text = await response.text();
+    let data: any = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (parseErr) {
+      throw new Error(`Gateway Error (${response.status}): ${text || 'Backend server returned an invalid response'}`);
+    }
 
     if (!response.ok || !data.success) {
       const errorMsg = data.error?.message || data.message || `Request failed with status ${response.status}`;
