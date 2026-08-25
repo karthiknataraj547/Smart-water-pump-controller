@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+*/node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+out/
+*/dist/
+*/build/
+
+# Local databases & logs
+backend/data/*.json
+backend/data/*.sqlite
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment & credentials
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Arduino / PlatformIO / C build artifacts
+.pio/
+.clangd/
+*.bin
+*.elf
+*.hex
+firmware/**/build/

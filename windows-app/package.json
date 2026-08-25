@@ -1,0 +1,16 @@
+{
+  "name": "smart-water-pump-windows-kiosk",
+  "version": "1.0.0",
+  "description": "Windows Projector & Control Room Desktop Application for Smart Water Pump Controller",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "dependencies": {
+    "electron": "^34.2.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^25.1.8"
+  }
+}

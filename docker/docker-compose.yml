@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # 1. MySQL 8.0 Relational Database
+  mysql:
+    image: mysql:8.0
+    container_name: aqua_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_secure_password
+      MYSQL_DATABASE: smart_water_pump
+      MYSQL_USER: pump_admin
+      MYSQL_PASSWORD: pump_secure_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../backend/src/database/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - aqua_net
+
+  # 2. Redis Cache & Session Store
+  redis:
+    image: redis:7-alpine
+    container_name: aqua_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - aqua_net
+
+  # 3. Eclipse Mosquitto MQTT Message Broker
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: aqua_mqtt
+    restart: always
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+    networks:
+      - aqua_net
+
+  # 4. Backend Gateway & REST/WS API
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: aqua_backend
+    restart: always
+    environment:
+      PORT: 5000
+      NODE_ENV: production
+      DB_TYPE: mysql
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: pump_admin
+      MYSQL_PASSWORD: pump_secure_password
+      MYSQL_DATABASE: smart_water_pump
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      JWT_SECRET: jwt_production_ultra_secret_key_change_me
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mysql
+      - redis
+      - mosquitto
+    networks:
+      - aqua_net
+
+  # 5. Frontend & Nginx Reverse Proxy
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: aqua_frontend
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - aqua_net
+
+volumes:
+  mysql_data:
+  redis_data:
+  mosquitto_data:
+
+networks:
+  aqua_net:
+    driver: bridge

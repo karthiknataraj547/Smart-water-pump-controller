@@ -1,0 +1,19 @@
+{
+  "name": "smart-water-pump-simulator",
+  "version": "1.0.0",
+  "description": "Hardware & Physics Emulation Suite for ESP32 and ESP8266 IoT Nodes",
+  "main": "dist/simulator_runner.js",
+  "scripts": {
+    "start": "ts-node simulator_runner.ts"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "@types/ws": "^8.5.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}

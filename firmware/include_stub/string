@@ -1,0 +1,63 @@
+#pragma once
+#ifndef _STD_STRING_DECLARED
+#define _STD_STRING_DECLARED
+
+#include <stdint.h>
+#include <stddef.h>
+
+#ifndef NULL
+#define NULL ((void*)0)
+#endif
+
+extern "C" {
+    size_t strlen(const char *s);
+    char *strcpy(char *dest, const char *src);
+    char *strncpy(char *dest, const char *src, size_t n);
+    int strcmp(const char *s1, const char *s2);
+}
+
+namespace std {
+    class string {
+    private:
+        char _buf[256];
+
+    public:
+        string() { _buf[0] = '\0'; }
+        string(const char* s) {
+            if (s) {
+                strncpy(_buf, s, sizeof(_buf) - 1);
+                _buf[sizeof(_buf) - 1] = '\0';
+            } else {
+                _buf[0] = '\0';
+            }
+        }
+        string(const string& other) {
+            strncpy(_buf, other._buf, sizeof(_buf));
+            _buf[sizeof(_buf) - 1] = '\0';
+        }
+        string& operator=(const string& other) {
+            if (this != &other) {
+                strncpy(_buf, other._buf, sizeof(_buf));
+                _buf[sizeof(_buf) - 1] = '\0';
+            }
+            return *this;
+        }
+        string& operator=(const char* s) {
+            if (s) {
+                strncpy(_buf, s, sizeof(_buf) - 1);
+                _buf[sizeof(_buf) - 1] = '\0';
+            } else {
+                _buf[0] = '\0';
+            }
+            return *this;
+        }
+        const char* c_str() const { return _buf; }
+        const char* data() const { return _buf; }
+        size_t length() const { return strlen(_buf); }
+        size_t size() const { return strlen(_buf); }
+        bool empty() const { return _buf[0] == '\0'; }
+        void clear() { _buf[0] = '\0'; }
+    };
+}
+
+#endif // _STD_STRING_DECLARED

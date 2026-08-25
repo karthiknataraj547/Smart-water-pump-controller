@@ -1,0 +1,435 @@
+@import "tailwindcss";
+
+:root {
+  --font-main: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-display: 'Chakra Petch', sans-serif;
+
+  /* ==========================================================================
+     DARK NEUMORPHIC (SOFT UI) TOKENS
+     ========================================================================== */
+  --neu-bg: #181c26;
+  --neu-surface: #181c26;
+  --neu-surface-soft: #1d222e;
+  
+  /* Dual Light Source Shadows (Dark Canvas) */
+  --neu-shadow-dark: #0f121a;
+  --neu-shadow-light: #222736;
+  --neu-shadow-ambient: rgba(0, 0, 0, 0.4);
+
+  /* Elevation Shadows */
+  --neu-raised-xs: 2px 2px 5px var(--neu-shadow-dark), -2px -2px 5px var(--neu-shadow-light);
+  --neu-raised-sm: 4px 4px 8px var(--neu-shadow-dark), -4px -4px 8px var(--neu-shadow-light);
+  --neu-raised-md: 7px 7px 16px var(--neu-shadow-dark), -7px -7px 16px var(--neu-shadow-light);
+  --neu-raised-lg: 12px 12px 26px var(--neu-shadow-dark), -12px -12px 26px var(--neu-shadow-light);
+  --neu-raised-xl: 18px 18px 36px var(--neu-shadow-dark), -18px -18px 36px var(--neu-shadow-light);
+
+  /* Inset / Sunken Wells */
+  --neu-inset-xs: inset 2px 2px 4px var(--neu-shadow-dark), inset -2px -2px 4px var(--neu-shadow-light);
+  --neu-inset-sm: inset 3px 3px 6px var(--neu-shadow-dark), inset -3px -3px 6px var(--neu-shadow-light);
+  --neu-inset-md: inset 5px 5px 12px var(--neu-shadow-dark), inset -5px -5px 12px var(--neu-shadow-light);
+  --neu-inset-deep: inset 8px 8px 18px var(--neu-shadow-dark), inset -8px -8px 18px var(--neu-shadow-light);
+
+  /* Gradients */
+  --neu-convex: linear-gradient(145deg, #1a1e29, #151821);
+  --neu-concave: linear-gradient(145deg, #151821, #1a1e29);
+  --neu-flat: #181c26;
+
+  /* Jewel Accents */
+  --accent-cyan: #00e5ff;
+  --accent-cyan-glow: rgba(0, 229, 255, 0.35);
+  --accent-emerald: #10b981;
+  --accent-emerald-glow: rgba(16, 185, 129, 0.35);
+  --accent-rose: #f43f5e;
+  --accent-rose-glow: rgba(244, 63, 94, 0.35);
+  --accent-amber: #f59e0b;
+  --accent-amber-glow: rgba(245, 158, 11, 0.35);
+  --accent-blue: #3b82f6;
+
+  /* Aliases for chassis */
+  --chassis-bg: var(--neu-bg);
+  --panel-bg: var(--neu-surface);
+  --extrude-sm: var(--neu-raised-sm);
+  --extrude-md: var(--neu-raised-md);
+  --extrude-lg: var(--neu-raised-lg);
+  --recessed-deep: var(--neu-inset-md);
+}
+
+/* ==========================================================================
+   LIGHT NEUMORPHIC (CERAMIC SOFT UI) THEME
+   ========================================================================== */
+[data-theme='light'], .light {
+  --neu-bg: #e2e8f0;
+  --neu-surface: #e2e8f0;
+  --neu-surface-soft: #eaeff5;
+
+  /* Dual Light Source Shadows (Light Canvas) */
+  --neu-shadow-dark: #b8c2cc;
+  --neu-shadow-light: #ffffff;
+  --neu-shadow-ambient: rgba(148, 163, 184, 0.3);
+
+  /* Elevation Shadows */
+  --neu-raised-xs: 2px 2px 5px var(--neu-shadow-dark), -2px -2px 5px var(--neu-shadow-light);
+  --neu-raised-sm: 4px 4px 9px var(--neu-shadow-dark), -4px -4px 9px var(--neu-shadow-light);
+  --neu-raised-md: 7px 7px 16px var(--neu-shadow-dark), -7px -7px 16px var(--neu-shadow-light);
+  --neu-raised-lg: 12px 12px 26px var(--neu-shadow-dark), -12px -12px 26px var(--neu-shadow-light);
+  --neu-raised-xl: 16px 16px 34px var(--neu-shadow-dark), -16px -16px 34px var(--neu-shadow-light);
+
+  /* Inset / Sunken Wells */
+  --neu-inset-xs: inset 2px 2px 4px var(--neu-shadow-dark), inset -2px -2px 4px var(--neu-shadow-light);
+  --neu-inset-sm: inset 3px 3px 6px var(--neu-shadow-dark), inset -3px -3px 6px var(--neu-shadow-light);
+  --neu-inset-md: inset 5px 5px 12px var(--neu-shadow-dark), inset -5px -5px 12px var(--neu-shadow-light);
+  --neu-inset-deep: inset 8px 8px 18px var(--neu-shadow-dark), inset -8px -8px 18px var(--neu-shadow-light);
+
+  /* Gradients */
+  --neu-convex: linear-gradient(145deg, #f2f6fa, #d5dde8);
+  --neu-concave: linear-gradient(145deg, #d5dde8, #f2f6fa);
+  --neu-flat: #e2e8f0;
+
+  /* Jewel Accents for Light Theme */
+  --accent-cyan: #0284c7;
+  --accent-cyan-glow: rgba(2, 132, 199, 0.25);
+  --accent-emerald: #059669;
+  --accent-emerald-glow: rgba(5, 150, 105, 0.25);
+  --accent-rose: #e11d48;
+  --accent-rose-glow: rgba(225, 29, 72, 0.25);
+  --accent-amber: #d97706;
+  --accent-amber-glow: rgba(217, 119, 6, 0.25);
+  --accent-blue: #2563eb;
+}
+
+body {
+  font-family: var(--font-main);
+  background-color: var(--neu-bg);
+  color: #e2e8f0;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+[data-theme='light'] body, .light body {
+  color: #334155;
+}
+
+/* ==========================================================================
+   NEUMORPHIC BASE CONTAINERS & PANELS
+   ========================================================================== */
+
+.neu-card, .neu-panel, .skeuo-panel {
+  background: var(--neu-surface);
+  border-radius: 20px;
+  box-shadow: var(--neu-raised-md);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  position: relative;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme='light'] .neu-card, [data-theme='light'] .neu-panel, [data-theme='light'] .skeuo-panel,
+.light .neu-card, .light .neu-panel, .light .skeuo-panel {
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.neu-card-convex {
+  background: var(--neu-convex);
+  border-radius: 20px;
+  box-shadow: var(--neu-raised-md);
+}
+
+.neu-card-hover:hover {
+  box-shadow: var(--neu-raised-lg);
+  transform: translateY(-2px);
+}
+
+/* ==========================================================================
+   NEUMORPHIC SUNKEN WELLS & INSETS
+   ========================================================================== */
+
+.neu-inset, .neu-bay, .skeuo-bay {
+  background: var(--neu-surface);
+  border-radius: 14px;
+  box-shadow: var(--neu-inset-sm);
+  border: none;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.neu-inset-deep {
+  background: var(--neu-surface);
+  border-radius: 16px;
+  box-shadow: var(--neu-inset-deep);
+}
+
+.neu-screen, .lcd-screen {
+  background: #0a0d14;
+  border-radius: 14px;
+  box-shadow: inset 3px 3px 8px #000000, inset -2px -2px 6px rgba(255,255,255,0.05), var(--neu-raised-xs);
+  border: 1px solid rgba(0, 229, 255, 0.15);
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+}
+
+[data-theme='light'] .neu-screen, [data-theme='light'] .lcd-screen,
+.light .neu-screen, .light .lcd-screen {
+  background: #111827;
+  color: #38bdf8;
+}
+
+/* ==========================================================================
+   NEUMORPHIC BUTTONS & INTERACTIVE CONTROLS
+   ========================================================================== */
+
+.neu-btn, .skeuo-btn {
+  background: var(--neu-surface);
+  border-radius: 14px;
+  box-shadow: var(--neu-raised-sm);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #e2e8f0;
+}
+
+[data-theme='light'] .neu-btn, [data-theme='light'] .skeuo-btn,
+.light .neu-btn, .light .skeuo-btn {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  color: #334155;
+}
+
+.neu-btn:hover {
+  box-shadow: var(--neu-raised-md);
+  color: #ffffff;
+}
+
+[data-theme='light'] .neu-btn:hover, .light .neu-btn:hover {
+  color: #0f172a;
+}
+
+.neu-btn:active, .neu-btn-active {
+  box-shadow: var(--neu-inset-sm) !important;
+  transform: translateY(1px);
+}
+
+/* Neumorphic Color Modifiers */
+.neu-btn-primary {
+  background: linear-gradient(145deg, #0284c7, #0369a1);
+  color: #ffffff !important;
+  box-shadow: 4px 4px 10px var(--neu-shadow-dark), -4px -4px 10px var(--neu-shadow-light), 0 0 15px var(--accent-cyan-glow);
+  border: none;
+}
+
+.neu-btn-primary:active {
+  box-shadow: inset 3px 3px 6px rgba(0,0,0,0.5), inset -2px -2px 4px rgba(255,255,255,0.2) !important;
+}
+
+.neu-btn-danger {
+  background: linear-gradient(145deg, #e11d48, #be123c);
+  color: #ffffff !important;
+  box-shadow: 4px 4px 10px var(--neu-shadow-dark), -4px -4px 10px var(--neu-shadow-light), 0 0 15px var(--accent-rose-glow);
+  border: none;
+}
+
+.neu-btn-danger:active {
+  box-shadow: inset 3px 3px 6px rgba(0,0,0,0.5), inset -2px -2px 4px rgba(255,255,255,0.2) !important;
+}
+
+.neu-btn-success {
+  background: linear-gradient(145deg, #059669, #047857);
+  color: #ffffff !important;
+  box-shadow: 4px 4px 10px var(--neu-shadow-dark), -4px -4px 10px var(--neu-shadow-light), 0 0 15px var(--accent-emerald-glow);
+  border: none;
+}
+
+.neu-btn-success:active {
+  box-shadow: inset 3px 3px 6px rgba(0,0,0,0.5), inset -2px -2px 4px rgba(255,255,255,0.2) !important;
+}
+
+/* ==========================================================================
+   NEUMORPHIC CIRCULAR BUTTONS & GAUGES
+   ========================================================================== */
+
+.neu-circle-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--neu-surface);
+  box-shadow: var(--neu-raised-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+[data-theme='light'] .neu-circle-btn, .light .neu-circle-btn {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.neu-circle-btn:hover {
+  box-shadow: var(--neu-raised-lg);
+}
+
+.neu-circle-btn:active, .neu-circle-btn.active {
+  box-shadow: var(--neu-inset-md);
+  color: var(--accent-cyan);
+}
+
+/* Master Industrial Pump Dial / Button */
+.neu-pump-master {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: var(--neu-convex);
+  box-shadow: var(--neu-raised-lg), inset 0 1px 0 rgba(255,255,255,0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.neu-pump-master::before {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  box-shadow: var(--neu-inset-sm);
+  pointer-events: none;
+}
+
+.neu-pump-master:active {
+  box-shadow: var(--neu-inset-deep);
+  transform: scale(0.97);
+}
+
+.neu-pump-master.running {
+  box-shadow: var(--neu-raised-md), 0 0 30px var(--accent-emerald-glow);
+}
+
+/* ==========================================================================
+   NEUMORPHIC INPUTS & SLIDERS
+   ========================================================================== */
+
+.neu-input {
+  background: var(--neu-surface);
+  border-radius: 12px;
+  box-shadow: var(--neu-inset-sm);
+  border: 1px solid transparent;
+  padding: 10px 16px;
+  color: #e2e8f0;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+[data-theme='light'] .neu-input, .light .neu-input {
+  color: #1e293b;
+}
+
+.neu-input:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: var(--neu-inset-md), 0 0 10px var(--accent-cyan-glow);
+}
+
+/* Neumorphic Range Slider Track */
+input[type=range].neu-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  background: transparent;
+}
+
+input[type=range].neu-slider::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 10px;
+  background: var(--neu-surface);
+  box-shadow: var(--neu-inset-sm);
+}
+
+input[type=range].neu-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 22px;
+  width: 22px;
+  border-radius: 50%;
+  background: var(--neu-convex);
+  box-shadow: var(--neu-raised-sm);
+  margin-top: -6px;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.15);
+  transition: all 0.15s ease;
+}
+
+input[type=range].neu-slider::-webkit-slider-thumb:hover {
+  box-shadow: var(--neu-raised-md), 0 0 10px var(--accent-cyan-glow);
+}
+
+/* ==========================================================================
+   NEUMORPHIC PILL CHIPS & BADGES
+   ========================================================================== */
+
+.neu-pill {
+  background: var(--neu-surface);
+  box-shadow: var(--neu-raised-xs);
+  border-radius: 9999px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+[data-theme='light'] .neu-pill, .light .neu-pill {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.neu-pill-inset {
+  background: var(--neu-surface);
+  box-shadow: var(--neu-inset-xs);
+  border-radius: 9999px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+/* Glowing Status Dots */
+.neu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.neu-dot-cyan {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 8px var(--accent-cyan);
+}
+
+.neu-dot-emerald {
+  background: var(--accent-emerald);
+  box-shadow: 0 0 8px var(--accent-emerald);
+}
+
+.neu-dot-rose {
+  background: var(--accent-rose);
+  box-shadow: 0 0 8px var(--accent-rose);
+}
+
+.neu-dot-amber {
+  background: var(--accent-amber);
+  box-shadow: 0 0 8px var(--accent-amber);
+}
+
+/* Compatibility helper aliases */
+.rivet-corner { position: relative; }

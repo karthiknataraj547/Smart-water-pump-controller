@@ -1,0 +1,102 @@
+import { Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
+import { db } from '../database/db';
+import { ENV } from '../config/env';
+import { AuthenticatedRequest, logAudit } from '../middleware/auth';
+import { User } from '../types';
+
+export async function register(req: Request, res: Response): Promise<void> {
+  try {
+    const { name, email, password, phone, role } = req.body;
+
+    if (!name || !email || !password) {
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Name, email, and password are required' } });
+      return;
+    }
+
+    const existing = await db.queryOne<User>('SELECT * FROM users WHERE email = ?', [email]);
+    if (existing) {
+      res.status(409).json({ success: false, error: { code: 'USER_EXISTS', message: 'A user with this email already exists' } });
+      return;
+    }
+
+    const userId = uuidv4();
+    const passwordHash = bcrypt.hashSync(password, 10);
+    const assignedRole = role === 'admin' ? 'admin' : (role === 'viewer' ? 'viewer' : 'operator');
+
+    await db.execute(
+      `INSERT INTO users (id, name, email, phone, password_hash, role, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'active', datetime('now'))`,
+      [userId, name, email, phone || null, passwordHash, assignedRole]
+    );
+
+    const token = jwt.sign({ id: userId, email, role: assignedRole, name }, ENV.JWT_SECRET, { expiresIn: ENV.JWT_EXPIRES_IN as any });
+    const refreshToken = jwt.sign({ id: userId }, ENV.JWT_REFRESH_SECRET, { expiresIn: ENV.JWT_REFRESH_EXPIRES_IN as any });
+
+    await logAudit('USER_REGISTER', 'web', { userId, details: `Registered with role: ${assignedRole}` });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        user: { id: userId, name, email, phone, role: assignedRole, status: 'active' },
+        token,
+        refreshToken
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
+  }
+}
+
+export async function login(req: Request, res: Response): Promise<void> {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email and password are required' } });
+      return;
+    }
+
+    const user = await db.queryOne<User>('SELECT * FROM users WHERE email = ?', [email]);
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' } });
+      return;
+    }
+
+    if (user.status !== 'active') {
+      res.status(403).json({ success: false, error: { code: 'ACCOUNT_SUSPENDED', message: 'User account is inactive' } });
+      return;
+    }
+
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role, name: user.name }, ENV.JWT_SECRET, { expiresIn: ENV.JWT_EXPIRES_IN as any });
+    const refreshToken = jwt.sign({ id: user.id }, ENV.JWT_REFRESH_SECRET, { expiresIn: ENV.JWT_REFRESH_EXPIRES_IN as any });
+
+    await logAudit('USER_LOGIN', 'web', { userId: user.id, details: 'User logged in successfully' });
+
+    res.json({
+      success: true,
+      data: {
+        user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, status: user.status },
+        token,
+        refreshToken
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
+  }
+}
+
+export async function getProfile(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = await db.queryOne<User>('SELECT id, name, email, phone, role, status, created_at FROM users WHERE id = ?', [req.user!.id]);
+    if (!user) {
+      res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
+      return;
+    }
+    res.json({ success: true, data: user });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
+  }
+}

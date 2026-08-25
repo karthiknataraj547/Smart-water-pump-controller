@@ -1,0 +1,21 @@
+CompileFlags:
+  Add:
+    - "-xc++"
+    - "-std=c++17"
+    - "-DARDUINO=10819"
+    - "-DESP32"
+    - "-DESP8266"
+    - "-I./firmware/include_stub"
+    - "-I../include_stub"
+    - "-I../../include_stub"
+    - "-I../../../include_stub"
+    - "-Id:/Smart water pump conroller/firmware/include_stub"
+    - "-I./firmware/esp32-main-node/include"
+    - "-I./firmware/esp8266-sub-node/include"
+Diagnostics:
+  Suppress:
+    - "pp_file_not_found"
+    - "drv_unknown_argument"
+    - "drv_unable_to_handle_compilation"
+    - "drv_expected_compiler_job"
+    - "unused-includes"
