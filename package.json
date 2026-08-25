@@ -2,16 +2,28 @@
   "name": "smart-water-pump-ecosystem",
   "version": "1.0.0",
   "description": "Smart IoT Water Pump Control & Telemetry Ecosystem",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "simulator"
+  ],
   "scripts": {
     "dev": "concurrently -n \"BACKEND,FRONTEND,SIMULATOR\" -c \"bgBlue.bold,bgGreen.bold,bgMagenta.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\" \"npm --prefix simulator start\"",
     "dev:hardware": "concurrently -n \"BACKEND,FRONTEND\" -c \"bgBlue.bold,bgGreen.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:simulator": "npm --prefix simulator start",
+    "install:all": "npm --prefix backend install && npm --prefix frontend install && npm --prefix simulator install",
+    "postinstall": "npm --prefix backend install --legacy-peer-deps && npm --prefix frontend install --legacy-peer-deps",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "start": "npm --prefix backend start",
     "test": "npm --prefix backend test"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
   }
 }
