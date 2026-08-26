@@ -1066,9 +1066,11 @@ void TaskNetworkLoop(void *parameter) {
                     String topic1 = String("devices/") + DEVICE_UID + "/telemetry";
                     String topic2 = String("aquacontrol/") + DEVICE_UID + "/telemetry";
                     String topic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/telemetry";
-                    mqttClient.publish(topic1.c_str(), buffer);
-                    mqttClient.publish(topic2.c_str(), buffer);
-                    mqttClient.publish(topic3.c_str(), buffer);
+                    bool p1 = mqttClient.publish(topic1.c_str(), buffer);
+                    bool p2 = mqttClient.publish(topic2.c_str(), buffer);
+                    bool p3 = mqttClient.publish(topic3.c_str(), buffer);
+                    Serial.printf("[MQTT TELEMETRY] Tx Tank: %.1f%% (%4.0fL) | Flow: %.1f LPM | P1:%d P2:%d P3:%d | Bytes: %d\n",
+                        latestTankData.water_level_pct, latestTankData.water_liters, latestTankData.flow_rate_lpm, p1, p2, p3, strlen(buffer));
                 }
             }
 
@@ -1110,6 +1112,9 @@ void setup() {
     pinMode(PIN_BTN_RESET, INPUT_PULLUP);
 
     digitalWrite(PIN_LED_POWER, HIGH); // Blue Power LED ON
+
+    mqttClient.setBufferSize(1024);
+    mqttClient.setKeepAlive(15);
 
     // 1. Load Saved Credentials from NVS Flash
     loadSavedCredentials();

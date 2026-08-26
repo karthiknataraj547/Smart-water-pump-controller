@@ -76,6 +76,12 @@ export class MqttBridge {
 
       this.cloudClient.on('connect', () => {
         console.log(`[MQTT] ✓ Cloud MQTT Bridge connected to ${cloudBrokerUrl}! Subscribing to device topics...`);
+        this.cloudClient?.subscribe('aquacontrol/#');
+        this.cloudClient?.subscribe('devices/WPC-A81F29/#');
+        this.cloudClient?.subscribe('aquacontrol/WPC-A81F29/#');
+        this.cloudClient?.subscribe('aquacontrol/+/telemetry');
+        this.cloudClient?.subscribe('aquacontrol/+/ack');
+        this.cloudClient?.subscribe('aquacontrol/+/status');
         this.cloudClient?.subscribe('devices/+/telemetry');
         this.cloudClient?.subscribe('devices/+/ack');
         this.cloudClient?.subscribe('devices/+/status');
@@ -98,20 +104,41 @@ export class MqttBridge {
 
   private async handleIncomingTopicMessage(topic: string, payloadStr: string): Promise<void> {
     try {
-      let deviceUid = '';
+      const data = JSON.parse(payloadStr);
+      let deviceUid = data.device_uid || data.deviceUid || '';
       let subTopic = '';
 
       const parts = topic.split('/');
       if (parts[0] === 'devices' && parts.length >= 3) {
-        deviceUid = parts[1];
+        if (!deviceUid) deviceUid = parts[1];
         subTopic = parts[2];
-      } else if (parts[0] === 'aquacontrol' && parts[1] === 'v1' && parts[2] === 'devices' && parts.length >= 5) {
-        deviceUid = parts[3];
-        subTopic = parts[4];
+      } else if (parts[0] === 'aquacontrol') {
+        if (parts.length === 3) {
+          if (!deviceUid) deviceUid = parts[1];
+          subTopic = parts[2];
+        } else if (parts[1] === 'v1' && parts[2] === 'devices' && parts.length >= 5) {
+          if (!deviceUid) deviceUid = parts[3];
+          subTopic = parts[4];
+        } else if (parts.length >= 2) {
+          subTopic = parts[parts.length - 1];
+        }
       }
 
-      if (!deviceUid || !subTopic) return;
-      const data = JSON.parse(payloadStr);
+      // Fallback topic inference
+      if (!subTopic) {
+        if (data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
+          subTopic = 'telemetry';
+        } else if (data.confirmed_state !== undefined || data.pump_state !== undefined) {
+          subTopic = 'ack';
+        } else if (data.status !== undefined) {
+          subTopic = 'status';
+        }
+      }
+
+      if (!deviceUid) deviceUid = 'WPC-A81F29';
+      if (!subTopic) return;
+
+      console.log(`[MQTT Bridge Inbound] Device: ${deviceUid} | Topic: '${topic}' | Sub: ${subTopic}`);
 
       if (subTopic === 'telemetry') {
         if (this.onTelemetryCallback) {
