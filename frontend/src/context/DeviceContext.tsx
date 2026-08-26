@@ -81,11 +81,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   // STRICT REAL-TIME MQTT HARDWARE STATUS (Zero Mocking):
-  // The device is considered online ONLY if genuine MQTT packets are arriving
+  // The device is considered online ONLY if genuine MQTT/WebSocket packets are arriving
   // from the physical ESP32 on topic 'devices/WPC-A81F29/telemetry' or 'status'
-  // within the last 4.5 seconds (ESP32 publishes at 1Hz).
+  // within the last 15 seconds (ESP32 publishes at 1Hz).
   const isDeviceOnline = Boolean(
-    lastTelemetryTimestamp > 0 && (nowTick - lastTelemetryTimestamp < 4500)
+    lastTelemetryTimestamp > 0 && (nowTick - lastTelemetryTimestamp < 15000)
   );
 
   // Load devices on auth change
@@ -163,7 +163,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       const client = mqtt.connect(brokerWsUrl, {
         clientId: `AquaControl_Web_${Math.random().toString(16).substring(2, 8)}`,
-        reconnectPeriod: 4000,
+        username: 'WPC-A81F29',
+        password: 'WPC_AUTH_SECURE_KEY_2026',
+        reconnectPeriod: 3000,
         connectTimeout: 8000
       });
       mqttClientRef.current = client;
@@ -171,51 +173,75 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       client.on('connect', () => {
         console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to topics...');
         setMqttConnected(true);
+        client.subscribe('devices/#');
+        client.subscribe('aquacontrol/#');
         client.subscribe('devices/+/telemetry');
         client.subscribe('devices/+/ack');
         client.subscribe('devices/+/status');
         client.subscribe('devices/+/alerts');
-        client.subscribe('aquacontrol/v1/devices/+/telemetry');
-        client.subscribe('aquacontrol/v1/devices/+/ack');
-        client.subscribe('aquacontrol/v1/devices/+/status');
-        client.subscribe('aquacontrol/v1/devices/+/alerts');
       });
 
       client.on('message', (topic: string, message: Buffer) => {
         try {
           const payloadStr = message.toString();
           const data = JSON.parse(payloadStr);
-          
-          let deviceUid = 'WPC-A81F29';
+          console.log(`[MQTT Inbound] Topic: '${topic}'`, data);
+
+          let deviceUid = data.device_uid || data.deviceUid || 'WPC-A81F29';
           let subTopic = '';
 
           const parts = topic.split('/');
-          if (parts[0] === 'devices' && parts.length >= 3) {
-            deviceUid = parts[1];
-            subTopic = parts[2];
-          } else if (parts[0] === 'aquacontrol' && parts[1] === 'v1' && parts[2] === 'devices' && parts.length >= 5) {
-            deviceUid = parts[3];
-            subTopic = parts[4];
+          if (parts[0] === 'devices') {
+            if (parts.length === 2) {
+              subTopic = parts[1];
+            } else if (parts.length >= 3) {
+              deviceUid = parts[1];
+              subTopic = parts[2];
+            }
+          } else if (parts[0] === 'aquacontrol') {
+            if (parts.length >= 5) {
+              deviceUid = parts[3];
+              subTopic = parts[4];
+            } else if (parts.length >= 3) {
+              subTopic = parts[parts.length - 1];
+            }
           }
 
-          if (!subTopic) return;
+          // Fallback inference if payload contains specific fields
+          if (!subTopic) {
+            if (data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
+              subTopic = 'telemetry';
+            } else if (data.confirmed_state !== undefined || data.pump_state !== undefined) {
+              subTopic = 'ack';
+            } else if (data.status !== undefined) {
+              subTopic = 'status';
+            }
+          }
 
-          if (subTopic === 'telemetry') {
+          if (subTopic === 'telemetry' || data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
             const now = Date.now();
             setLastTelemetryTimestamp(now);
             setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
             setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
 
+            const waterPct = Number(data.water_level_percentage ?? data.water_level_pct ?? data.waterLevelPercentage ?? 0);
+            const waterLiters = Number(data.water_level_liters ?? data.waterLevelLiters ?? (waterPct * 20));
+            const flowRate = Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? data.inflowRateLpm ?? 0);
+            const totalLiters = Number(data.total_inflow_liters ?? data.total_inflow_l ?? data.totalInflowLiters ?? 0);
+            const tds = Number(data.tds_ppm ?? data.tdsPpm ?? 0);
+            const temp = Number(data.temperature_c ?? data.temperatureC ?? 25);
+            const status = data.sensor_status || data.sensorStatus || 'HEALTHY';
+
             setTelemetry({
               id: `tel_${now}`,
               device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-              water_level_percentage: Number(data.water_level_percentage ?? data.water_level_pct ?? 0),
-              water_level_liters: Number(data.water_level_liters ?? 0),
-              inflow_rate_lpm: Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? 0),
-              total_inflow_liters: Number(data.total_inflow_liters ?? 0),
-              tds_ppm: Number(data.tds_ppm ?? 0),
-              temperature_c: Number(data.temperature_c ?? 25),
-              sensor_status: data.sensor_status || 'HEALTHY',
+              water_level_percentage: waterPct,
+              water_level_liters: waterLiters,
+              inflow_rate_lpm: flowRate,
+              total_inflow_liters: totalLiters,
+              tds_ppm: tds,
+              temperature_c: temp,
+              sensor_status: status,
               created_at: new Date(now).toISOString()
             });
 
@@ -278,7 +304,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               }, ...prev]);
             }
           }
-        } catch (e) {}
+        } catch (e) {
+          console.warn('[MQTT] Inbound message parsing error:', e);
+        }
       });
 
       client.on('error', (err) => {

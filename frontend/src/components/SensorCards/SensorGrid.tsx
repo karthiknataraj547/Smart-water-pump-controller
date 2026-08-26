@@ -5,10 +5,10 @@ import { Droplet, Waves, Radio, Sparkles } from 'lucide-react';
 export const SensorGrid: React.FC = () => {
   const { telemetry, isDeviceOnline } = useDevice();
 
-  const inflowRate = isDeviceOnline ? (telemetry?.inflow_rate_lpm || 0) : 0;
-  const totalLiters = isDeviceOnline ? (telemetry?.total_inflow_liters || 0) : 0;
-  const tdsPpm = isDeviceOnline ? (telemetry?.tds_ppm || 0) : 0;
-  const rssi = isDeviceOnline ? ((telemetry as any)?.rssi || -55) : 0;
+  const inflowRate = Number(telemetry?.inflow_rate_lpm || 0);
+  const totalLiters = Number(telemetry?.total_inflow_liters || 0);
+  const tdsPpm = Number(telemetry?.tds_ppm || 0);
+  const rssi = Number((telemetry as any)?.rssi || -55);
 
   const getTdsPurityText = (ppm: number) => {
     if (!isDeviceOnline) return { label: 'HARDWARE OFFLINE', badge: 'text-slate-400 bg-slate-900/40' };
