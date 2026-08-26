@@ -3,6 +3,7 @@
  * SMART WATER PUMP CONTROLLER — ESP32 INDUSTRIAL MAIN NODE FIRMWARE
  * ============================================================================
  * Target Hardware: ESP32-WROOM-32 / ESP32 Dev Module
+ * Version: v2.2.0 (Production MQTT & Captive Portal Release)
  * Platform: Arduino IDE / PlatformIO
  * 
  * Hardware Pinout:

@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    - "-xc++"
+    - "-std=c++17"
+    - "-DARDUINO=10819"
+    - "-DESP8266"
+    - "-I../../include_stub"
+Diagnostics:
+  Suppress:
+    - "*"
