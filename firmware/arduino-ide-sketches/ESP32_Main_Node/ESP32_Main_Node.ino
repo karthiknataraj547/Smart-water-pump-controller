@@ -460,11 +460,18 @@ void setCorsHeaders() {
 }
 
 void setupHttpEndpoints() {
-    // 1. CORS Preflight
-    localServer.on("/api/v1/wifi/config", HTTP_OPTIONS, []() { setCorsHeaders(); localServer.send(204, "text/plain", ""); });
-    localServer.on("/api/v1/wifi/scan", HTTP_OPTIONS, []() { setCorsHeaders(); localServer.send(204, "text/plain", ""); });
-    localServer.on("/provision", HTTP_OPTIONS, []() { setCorsHeaders(); localServer.send(204, "text/plain", ""); });
-    localServer.on("/api/v1/pump/control", HTTP_OPTIONS, []() { setCorsHeaders(); localServer.send(204, "text/plain", ""); });
+    // 1. CORS Preflight Handlers
+    auto handleOptions = []() { setCorsHeaders(); localServer.send(204, "text/plain", ""); };
+    localServer.on("/api/v1/wifi/config", HTTP_OPTIONS, handleOptions);
+    localServer.on("/api/v1/wifi/scan", HTTP_OPTIONS, handleOptions);
+    localServer.on("/provision", HTTP_OPTIONS, handleOptions);
+    localServer.on("/api/v1/pump/control", HTTP_OPTIONS, handleOptions);
+    localServer.on("/api/v1/devices", HTTP_OPTIONS, handleOptions);
+    localServer.on("/api/v1/sensors/latest", HTTP_OPTIONS, handleOptions);
+    localServer.on("/api/v1/pumps/status", HTTP_OPTIONS, handleOptions);
+    localServer.on("/api/v1/pumps/start", HTTP_OPTIONS, handleOptions);
+    localServer.on("/api/v1/pumps/stop", HTTP_OPTIONS, handleOptions);
+    localServer.on("/api/v1/pumps/emergency-stop", HTTP_OPTIONS, handleOptions);
 
     // 2. Captive Portal Root Page
     localServer.on("/", HTTP_GET, []() {
@@ -499,32 +506,97 @@ void setupHttpEndpoints() {
     localServer.on("/api/v1/wifi/config", HTTP_POST, handleWifiConfig);
     localServer.on("/provision", HTTP_POST, handleWifiConfig);
 
-    // 5. Live Status Endpoint
-    localServer.on("/api/v1/status", HTTP_GET, []() {
+    // 5. REST: /api/v1/devices (Web App Device Sync)
+    localServer.on("/api/v1/devices", HTTP_GET, []() {
         setCorsHeaders();
         StaticJsonDocument<512> doc;
-        doc["device_uid"] = DEVICE_UID;
-        doc["firmware_version"] = FIRMWARE_VERSION;
-        doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
-        doc["mqtt_connected"] = mqttClient.connected();
-        doc["mqtt_broker"] = mqttBroker;
-        doc["ip_address"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
-        doc["rssi"] = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
-        doc["pump_state"] = pumpState ? "ON" : "OFF";
-        doc["pump_mode"] = pumpMode;
-        doc["current_amps"] = currentAmps;
-        doc["runtime_seconds"] = totalRuntimeSeconds;
-        doc["water_level_pct"] = latestTankData.water_level_pct;
-        doc["flow_rate_lpm"] = latestTankData.flow_rate_lpm;
-        doc["tds_ppm"] = latestTankData.tds_ppm;
-        doc["subnode_online"] = subNodeConnected;
+        JsonArray arr = doc.to<JsonArray>();
+        JsonObject dev = arr.createNestedObject();
+        dev["id"] = "97511f3d-e3b7-4b75-876f-b11b259f86d5";
+        dev["device_uid"] = DEVICE_UID;
+        dev["name"] = "Main Submersible Pump";
+        dev["device_name"] = "Main Submersible Pump";
+        dev["status"] = (WiFi.status() == WL_CONNECTED) ? "online" : "offline";
+        dev["is_online"] = (WiFi.status() == WL_CONNECTED);
+        dev["tank_capacity_liters"] = 2000;
+        dev["firmware_version"] = FIRMWARE_VERSION;
+        dev["hardware_model"] = "ESP32-WROOM-32";
+        dev["ip_address"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
 
-        String response;
-        serializeJson(doc, response);
-        localServer.send(200, "application/json", response);
+        String res;
+        serializeJson(doc, res);
+        localServer.send(200, "application/json", res);
     });
 
-    // 6. Direct Local Pump Control Endpoint
+    // 6. REST: /api/v1/sensors/latest & /api/v1/status
+    auto handleSensorsLatest = []() {
+        setCorsHeaders();
+        StaticJsonDocument<512> doc;
+        doc["id"] = "sen_live";
+        doc["device_id"] = "97511f3d-e3b7-4b75-876f-b11b259f86d5";
+        doc["device_uid"] = DEVICE_UID;
+        doc["water_level_percentage"] = latestTankData.water_level_pct;
+        doc["water_level_liters"] = latestTankData.water_liters;
+        doc["inflow_rate_lpm"] = latestTankData.flow_rate_lpm;
+        doc["flow_rate_lpm"] = latestTankData.flow_rate_lpm;
+        doc["total_inflow_liters"] = latestTankData.total_inflow_l;
+        doc["tds_ppm"] = latestTankData.tds_ppm;
+        doc["temperature_c"] = latestTankData.temperature_c;
+        doc["sensor_status"] = "HEALTHY";
+        doc["pump_running"] = pumpState;
+        doc["current_amps"] = currentAmps;
+        doc["subnode_online"] = subNodeConnected;
+        doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+        doc["mqtt_connected"] = mqttClient.connected();
+        doc["ip_address"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+
+        String res;
+        serializeJson(doc, res);
+        localServer.send(200, "application/json", res);
+    };
+
+    localServer.on("/api/v1/sensors/latest", HTTP_GET, handleSensorsLatest);
+    localServer.on("/api/v1/status", HTTP_GET, handleSensorsLatest);
+
+    // 7. REST: /api/v1/pumps/status
+    localServer.on("/api/v1/pumps/status", HTTP_GET, []() {
+        setCorsHeaders();
+        StaticJsonDocument<256> doc;
+        doc["id"] = "ps_live";
+        doc["device_id"] = "97511f3d-e3b7-4b75-876f-b11b259f86d5";
+        doc["pump_state"] = pumpState ? "ON" : "OFF";
+        doc["mode"] = pumpMode;
+        doc["current_draw_amps"] = currentAmps;
+        doc["runtime_seconds"] = totalRuntimeSeconds;
+        doc["changed_at"] = "live";
+        doc["changed_by"] = "ESP32_FIRMWARE";
+
+        String res;
+        serializeJson(doc, res);
+        localServer.send(200, "application/json", res);
+    });
+
+    // 8. REST: Direct Local Pump Control Endpoints (/api/v1/pumps/start, /stop, /emergency-stop, /control)
+    localServer.on("/api/v1/pumps/start", HTTP_POST, []() {
+        setCorsHeaders();
+        systemFault = false;
+        digitalWrite(PIN_LED_FAULT, LOW);
+        setPumpState(true, "LOCAL_REST_API");
+        localServer.send(200, "application/json", "{\"success\":true,\"pump_state\":\"ON\"}");
+    });
+
+    localServer.on("/api/v1/pumps/stop", HTTP_POST, []() {
+        setCorsHeaders();
+        setPumpState(false, "LOCAL_REST_API");
+        localServer.send(200, "application/json", "{\"success\":true,\"pump_state\":\"OFF\"}");
+    });
+
+    localServer.on("/api/v1/pumps/emergency-stop", HTTP_POST, []() {
+        setCorsHeaders();
+        triggerEmergencyStop("Local REST Emergency Command");
+        localServer.send(200, "application/json", "{\"success\":true,\"status\":\"EMERGENCY_STOP\"}");
+    });
+
     localServer.on("/api/v1/pump/control", HTTP_POST, []() {
         setCorsHeaders();
         String body = localServer.arg("plain");
@@ -553,7 +625,7 @@ void setupHttpEndpoints() {
         }
     });
 
-    // 7. Captive Portal Redirect
+    // 9. Captive Portal Fallback Redirect
     localServer.onNotFound([]() {
         setCorsHeaders();
         localServer.sendHeader("Location", "http://192.168.4.1/", true);
@@ -835,6 +907,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 void TaskNetworkLoop(void *parameter) {
     esp_task_wdt_add(NULL);
     uint32_t lastTelemetryPublish = 0;
+    uint32_t lastHttpTelemetryTime = 0;
 
     for (;;) {
         esp_task_wdt_reset();
@@ -845,33 +918,47 @@ void TaskNetworkLoop(void *parameter) {
 
         // 2. Wi-Fi Connection State Machine
         if (WiFi.status() == WL_CONNECTED) {
-            wifiConnected = true;
+            if (!wifiConnected) {
+                wifiConnected = true;
+                Serial.printf("[WiFi STA] ✓ Connected! IP Address: %s (RSSI: %d dBm)\n",
+                    WiFi.localIP().toString().c_str(), WiFi.RSSI());
+            }
         } else {
-            wifiConnected = false;
-            if (wifiSsid.length() > 0 && millis() - lastWifiCheck > 6000) {
+            if (wifiConnected) {
+                wifiConnected = false;
+                Serial.println("[WiFi STA] Connection lost. Waiting to reconnect...");
+            }
+            if (wifiSsid.length() > 0 && millis() - lastWifiCheck > 12000) {
                 lastWifiCheck = millis();
-                Serial.printf("[WiFi STA] Reconnecting to '%s'...\n", wifiSsid.c_str());
+                Serial.printf("[WiFi STA] Connecting to '%s'...\n", wifiSsid.c_str());
                 WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
             }
         }
 
-        // 3. MQTT Reconnect Loop with LWT
+        // 3. MQTT Connection & Dual-Channel Telemetry Sync
         if (wifiConnected) {
             if (!mqttClient.connected()) {
-                if (millis() - lastMqttCheck > 4000) {
+                if (millis() - lastMqttCheck > 3000) {
                     lastMqttCheck = millis();
                     mqttClient.setServer(mqttBroker.c_str(), mqttPort);
                     mqttClient.setCallback(onMqttMessage);
                     mqttClient.setBufferSize(1024);
+                    mqttClient.setKeepAlive(30);
 
                     String clientId = String("ESP32_") + DEVICE_UID + "_" + String(random(1000, 9999));
                     String lwtTopic = String("devices/") + DEVICE_UID + "/status";
                     String lwtPayload = "{\"status\":\"offline\",\"device_uid\":\"" + String(DEVICE_UID) + "\"}";
 
-                    Serial.printf("[MQTT] Connecting to broker '%s:%d' as '%s'...\n",
+                    Serial.printf("[MQTT] Connecting to '%s:%d' (Client: %s)...\n",
                         mqttBroker.c_str(), mqttPort, clientId.c_str());
 
-                    if (mqttClient.connect(clientId.c_str(), DEVICE_UID, authCode.c_str(), lwtTopic.c_str(), 1, true, lwtPayload.c_str())) {
+                    // Try standard open connection first (ideal for broker.emqx.io)
+                    bool conn = mqttClient.connect(clientId.c_str(), lwtTopic.c_str(), 0, true, lwtPayload.c_str());
+                    if (!conn && authCode.length() > 0) {
+                        conn = mqttClient.connect(clientId.c_str(), DEVICE_UID, authCode.c_str(), lwtTopic.c_str(), 0, true, lwtPayload.c_str());
+                    }
+
+                    if (conn) {
                         mqttConnected = true;
                         Serial.println("[MQTT] ✓ Connected to Cloud MQTT Broker!");
 
@@ -881,18 +968,18 @@ void TaskNetworkLoop(void *parameter) {
 
                         // Subscribe to pump commands
                         String cmdTopic = String("devices/") + DEVICE_UID + "/commands";
-                        mqttClient.subscribe(cmdTopic.c_str(), 1);
+                        mqttClient.subscribe(cmdTopic.c_str(), 0);
                         Serial.printf("[MQTT] Subscribed to command topic: '%s'\n", cmdTopic.c_str());
                     } else {
                         mqttConnected = false;
-                        Serial.printf("[MQTT] Connection failed (rc=%d). Will retry in 4s...\n", mqttClient.state());
+                        Serial.printf("[MQTT] Connection attempt failed (rc=%d). Retrying in 3s...\n", mqttClient.state());
                     }
                 }
             } else {
                 mqttConnected = true;
                 mqttClient.loop();
 
-                // Publish Telemetry every 1 second
+                // Publish Telemetry over MQTT every 1 second
                 if (millis() - lastTelemetryPublish > 1000) {
                     lastTelemetryPublish = millis();
 
@@ -925,6 +1012,12 @@ void TaskNetworkLoop(void *parameter) {
                     String topic = String("devices/") + DEVICE_UID + "/telemetry";
                     mqttClient.publish(topic.c_str(), buffer);
                 }
+            }
+
+            // Continuous Outbound HTTP REST Telemetry Sync (Every 2.5s)
+            if (millis() - lastHttpTelemetryTime > 2500) {
+                lastHttpTelemetryTime = millis();
+                sendHttpTelemetry();
             }
         } else {
             mqttConnected = false;
@@ -1009,9 +1102,9 @@ void loop() {
     // =================================================================
     // 1. WI-FI & MQTT LED STATUS INDICATION
     // =================================================================
-    // When connected to Wi-Fi & MQTT: Solid ON
-    // When connecting / provisioning: Blinks every 500ms
-    if (WiFi.status() == WL_CONNECTED && mqttClient.connected()) {
+    // When connected to Wi-Fi: Solid ON
+    // When connecting / searching: Blinks every 500ms
+    if (WiFi.status() == WL_CONNECTED) {
         digitalWrite(PIN_LED_WIFI, HIGH);
     } else {
         if (millis() - lastLedBlinkTime >= 500) {

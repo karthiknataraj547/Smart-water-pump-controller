@@ -280,7 +280,7 @@ export class ApiService {
           throw new Error(`Gateway Error (${response.status}): ${text || 'Invalid response'}`);
         }
 
-        if (!response.ok || !data.success) {
+        if (!response.ok || data.success === false) {
           const errorMsg = data.error?.message || data.message || `Request failed with status ${response.status}`;
           throw new Error(errorMsg);
         }

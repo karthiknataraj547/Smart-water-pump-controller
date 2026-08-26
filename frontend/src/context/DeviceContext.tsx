@@ -80,14 +80,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => clearInterval(timer);
   }, []);
 
-  // Strict Physical Device Online State Check:
-  // Hardware is online if MQTT/WS is connected and telemetry was received within last 15 seconds,
-  // or reported online with fresh heartbeat.
+  // Resilient Physical Device Online State Check:
+  // Hardware is online if fresh telemetry arrived via MQTT/WS/REST within the last 45s,
+  // or reported online by the device model.
   const isDeviceOnline = Boolean(
-    (wsConnected || mqttConnected) &&
-    (selectedDevice?.status === 'online' || (nowTick - lastTelemetryTimestamp < 15000)) &&
-    lastTelemetryTimestamp > 0 &&
-    (nowTick - lastTelemetryTimestamp < 15000)
+    (lastTelemetryTimestamp > 0 && nowTick - lastTelemetryTimestamp < 45000) ||
+    selectedDevice?.status === 'online' ||
+    wsConnected
   );
 
   // Load devices on auth change
@@ -124,9 +123,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ApiService.getAutomationRules(deviceId)
       ]);
 
-      if (pStatus.status === 'fulfilled' && pStatus.value) setPumpStatus(pStatus.value);
+      if (pStatus.status === 'fulfilled' && pStatus.value) {
+        setPumpStatus(pStatus.value);
+      }
       if (tReading.status === 'fulfilled' && tReading.value) {
         setTelemetry(tReading.value);
+        setLastTelemetryTimestamp(Date.now());
       }
       if (aList.status === 'fulfilled' && aList.value) setAlerts(aList.value);
       if (rList.status === 'fulfilled' && rList.value) setRules(rList.value);
@@ -135,10 +137,16 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, []);
 
+  // Real-time periodic synchronization poll (every 3 seconds)
   useEffect(() => {
-    if (selectedDevice) {
+    if (!selectedDevice) return;
+    loadDeviceData(selectedDevice.id);
+
+    const pollTimer = setInterval(() => {
       loadDeviceData(selectedDevice.id);
-    }
+    }, 3000);
+
+    return () => clearInterval(pollTimer);
   }, [selectedDevice, loadDeviceData]);
 
   const refreshRules = useCallback(async () => {
