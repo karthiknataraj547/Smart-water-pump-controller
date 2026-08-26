@@ -428,6 +428,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       command_type: cmdType,
       action: actionStr,
       mode: payload.mode,
+      auth_token: 'WPC_AUTH_SECURE_KEY_2026',
+      token: 'WPC_AUTH_SECURE_KEY_2026',
       payload,
       source: 'WEB_DASHBOARD',
       timestamp: Math.floor(Date.now() / 1000)

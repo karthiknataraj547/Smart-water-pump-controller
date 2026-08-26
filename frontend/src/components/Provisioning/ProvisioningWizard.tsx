@@ -152,11 +152,12 @@ export const ProvisioningWizard: React.FC = () => {
 
     setProvisioning(true);
     setErrorMsg('');
-    setStatusMessage('1/3 Encoding Wi-Fi, MQTT, WebSocket, API & Auth Code...');
-    const authCode = 'WPC_AUTH_' + Math.random().toString(36).substring(2, 8).toUpperCase() + '_' + Date.now().toString(36).toUpperCase();
+    setStatusMessage('1/3 Encoding Wi-Fi, MQTT, WebSocket, API & Auth Token...');
+    const authCode = 'WPC_AUTH_SECURE_KEY_2026';
+    const mqttBrokerHost = 'broker.emqx.io';
     const apiUrl = `http://${serverHost}:${serverPort}/api/v1`;
     const wsUrl = `ws://${serverHost}:${serverPort}/ws`;
-    addLog(`Preparing Wi-Fi & Auth payload: SSID="${wifiSsid}", Broker="${serverHost}:1883", API="${apiUrl}", Auth="${authCode}"`);
+    addLog(`Preparing Wi-Fi & Auth payload: SSID="${wifiSsid}", Broker="${mqttBrokerHost}:1883", API="${apiUrl}", Auth="${authCode}"`);
 
     const credPayload = JSON.stringify({
       s: wifiSsid,
@@ -167,10 +168,11 @@ export const ProvisioningWizard: React.FC = () => {
       port: serverPort,
       server_host: serverHost,
       server_port: serverPort,
-      mqtt_broker: serverHost,
+      mqtt_broker: mqttBrokerHost,
       mqtt_port: 1883,
       auth: authCode,
-      auth_code: authCode
+      auth_code: authCode,
+      auth_token: authCode
     });
 
     let blePushed = false;

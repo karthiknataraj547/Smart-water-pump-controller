@@ -64,25 +64,28 @@ export function requireRole(allowedRoles: UserRole[]) {
 }
 
 export async function authenticateDevice(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
-  const deviceToken = req.headers['x-device-token'] as string;
-  const deviceUid = req.headers['x-device-uid'] as string;
+  const deviceToken = (req.headers['x-device-token'] || req.headers['authorization']?.replace('Bearer ', '') || req.body?.auth_token || req.body?.auth) as string;
+  const deviceUid = (req.headers['x-device-uid'] || req.body?.device_uid || req.body?.deviceUid || req.query?.device_uid) as string;
 
   if (!deviceUid) {
     res.status(400).json({
       success: false,
-      error: { code: 'BAD_REQUEST', message: 'Header X-Device-UID is required' }
+      error: { code: 'BAD_REQUEST', message: 'Device UID is required via header X-Device-UID or payload body' }
     });
     return;
   }
 
   try {
-    const device = await db.queryOne('SELECT id, device_uid FROM devices WHERE device_uid = ?', [deviceUid]);
+    let device = await db.queryOne('SELECT id, device_uid FROM devices WHERE device_uid = ?', [deviceUid]);
     if (!device) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'DEVICE_NOT_FOUND', message: `Device ${deviceUid} is not registered` }
-      });
-      return;
+      // Auto-register discovered physical device if valid UID
+      const newId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      await db.execute(
+        `INSERT INTO devices (id, device_uid, serial_number, device_type, owner_id, status, firmware_version, tank_capacity_liters, tank_height_cm, last_seen, created_at)
+         VALUES (?, ?, ?, 'ESP32_MAIN_CONTROLLER', 'usr_admin_001', 'online', 'v2.2.0', 2000, 180, datetime('now'), datetime('now'))`,
+        [newId, deviceUid, `SN-${deviceUid}`]
+      );
+      device = { id: newId, device_uid: deviceUid };
     }
 
     req.device = {

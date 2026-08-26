@@ -736,9 +736,13 @@ void sendHttpStateAck(const char* state, const char* initiator, const char* cmdI
     String url = String("http://") + apiServerHost + ":" + String(apiServerPort) + "/api/v1/pump/ack";
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-Device-UID", DEVICE_UID);
+    http.addHeader("X-Device-Token", authCode.c_str());
+    http.addHeader("Authorization", String("Bearer ") + authCode);
 
     StaticJsonDocument<384> doc;
     doc["device_uid"] = DEVICE_UID;
+    doc["auth_token"] = authCode;
     if (cmdId && strlen(cmdId) > 0) doc["cmd_id"] = cmdId;
     doc["status"] = systemFault ? "failed" : "successful";
     doc["confirmed_state"] = state;
@@ -760,9 +764,13 @@ void sendHttpTelemetry() {
     String url = String("http://") + apiServerHost + ":" + String(apiServerPort) + "/api/v1/sensors/telemetry";
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-Device-UID", DEVICE_UID);
+    http.addHeader("X-Device-Token", authCode.c_str());
+    http.addHeader("Authorization", String("Bearer ") + authCode);
 
     StaticJsonDocument<512> doc;
     doc["device_uid"] = DEVICE_UID;
+    doc["auth_token"] = authCode;
     doc["water_level_percentage"] = latestTankData.water_level_pct;
     doc["water_level_liters"] = latestTankData.water_liters;
     doc["inflow_rate_lpm"] = latestTankData.flow_rate_lpm;
@@ -770,6 +778,7 @@ void sendHttpTelemetry() {
     doc["tds_ppm"] = latestTankData.tds_ppm;
     doc["temperature_c"] = latestTankData.temperature_c;
     doc["pump_running"] = pumpState;
+    doc["pump_state"] = pumpState ? "ON" : "OFF";
     doc["current_amps"] = currentAmps;
     doc["subnode_online"] = subNodeConnected;
 
