@@ -124,9 +124,22 @@ public:
     float toFloat() const { return (float)atof(_buffer); }
     const char* c_str() const { return _buffer; }
     size_t length() const { return strlen(_buffer); }
-    int indexOf(char ch) const {
-        const char* p = strchr(_buffer, ch);
+    int indexOf(char ch, unsigned int fromIndex = 0) const {
+        if (fromIndex >= strlen(_buffer)) return -1;
+        const char* p = strchr(_buffer + fromIndex, ch);
         return p ? (int)(p - _buffer) : -1;
+    }
+    String substring(unsigned int from, unsigned int to = 0) const {
+        size_t len = strlen(_buffer);
+        if (from >= len) return String("");
+        if (to == 0 || to > len) to = (unsigned int)len;
+        if (to <= from) return String("");
+        char temp[256];
+        size_t copyLen = to - from;
+        if (copyLen >= sizeof(temp)) copyLen = sizeof(temp) - 1;
+        strncpy(temp, _buffer + from, copyLen);
+        temp[copyLen] = '\0';
+        return String(temp);
     }
     void trim() {}
     bool startsWith(const char* prefix) const {
@@ -214,6 +227,8 @@ inline uint8_t digitalPinToInterrupt(uint8_t pin) { return pin; }
 inline float abs(float x) { return x < 0.0f ? -x : x; }
 inline double abs(double x) { return x < 0.0 ? -x : x; }
 inline int abs(int x) { return x < 0 ? -x : x; }
+inline long random(long min, long max) { return min; }
+inline long random(long max) { return 0; }
 
 // FreeRTOS types & macros
 typedef void* TaskHandle_t;

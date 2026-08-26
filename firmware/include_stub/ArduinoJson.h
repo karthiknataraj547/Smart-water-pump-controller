@@ -3,6 +3,9 @@
 
 #include "Arduino.h"
 
+class JsonObject;
+class JsonArray;
+
 class JsonVariant {
 public:
     JsonVariant() {}
@@ -37,6 +40,16 @@ public:
     bool containsKey(const char* key) const { return false; }
 };
 
+class JsonArray {
+public:
+    JsonArray() {}
+    JsonObject createNestedObject() { return JsonObject(); }
+    JsonVariant operator[](size_t index) const { return JsonVariant(); }
+    size_t size() const { return 0; }
+    template<typename T>
+    bool add(T v) { return true; }
+};
+
 template<size_t CAPACITY>
 class StaticJsonDocument {
 public:
@@ -46,6 +59,9 @@ public:
     
     template<typename T>
     void set(T v) {}
+
+    JsonArray createNestedArray(const char* key) { return JsonArray(); }
+    JsonObject createNestedObject(const char* key) { return JsonObject(); }
 
     JsonVariant operator[](const char* key) { return JsonVariant(); }
     const JsonVariant operator[](const char* key) const { return JsonVariant(); }

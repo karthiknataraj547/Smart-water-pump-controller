@@ -11,6 +11,16 @@ enum WiFiMode_t {
     WIFI_AP_STA = 3
 };
 
+enum wifi_auth_mode_t {
+    WIFI_AUTH_OPEN = 0,
+    WIFI_AUTH_WEP = 1,
+    WIFI_AUTH_WPA_PSK = 2,
+    WIFI_AUTH_WPA2_PSK = 3,
+    WIFI_AUTH_WPA_WPA2_PSK = 4,
+    WIFI_AUTH_WPA2_ENTERPRISE = 5,
+    WIFI_AUTH_WPA3_PSK = 6
+};
+
 enum wl_status_t {
     WL_NO_SHIELD = 255,
     WL_IDLE_STATUS = 0,
@@ -48,6 +58,10 @@ public:
     IPAddress localIP() { return IPAddress(); }
     String macAddress() { return "24:6F:28:A8:1F:29"; }
     int RSSI() { return -55; }
+    int RSSI(int index) { return -55; }
+    int scanNetworks() { return 0; }
+    String SSID(int index) { return "WiFi_Network"; }
+    wifi_auth_mode_t encryptionType(int index) { return WIFI_AUTH_WPA2_PSK; }
     bool softAP(const char* ssid, const char* passphrase = NULL, int channel = 1, int ssid_hidden = 0) { return true; }
     bool softAPdisconnect(bool wifioff = false) { return true; }
     IPAddress softAPIP() { return IPAddress(); }
