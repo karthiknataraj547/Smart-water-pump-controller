@@ -29,7 +29,7 @@ export const ProvisioningWizard: React.FC = () => {
   const [serverHost, setServerHost] = useState<string>(
     window.location.hostname && window.location.hostname !== 'localhost'
       ? window.location.hostname
-      : '192.168.31.54'
+      : '192.168.31.53'
   );
   const [serverPort, setServerPort] = useState<number>(5000);
   const [tankCapacity, setTankCapacity] = useState<number>(2000);
@@ -165,7 +165,12 @@ export const ProvisioningWizard: React.FC = () => {
       password: wifiPassword,
       h: serverHost,
       port: serverPort,
-      auth: authCode
+      server_host: serverHost,
+      server_port: serverPort,
+      mqtt_broker: serverHost,
+      mqtt_port: 1883,
+      auth: authCode,
+      auth_code: authCode
     });
 
     let blePushed = false;

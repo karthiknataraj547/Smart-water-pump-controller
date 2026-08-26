@@ -84,7 +84,7 @@
 // Quick Wi-Fi & Gateway Defaults (Pre-configured for instant connection)
 #define DEFAULT_WIFI_SSID      "Monk"            // Set your 2.4GHz Wi-Fi Name
 #define DEFAULT_WIFI_PASS      ""                // Set your Wi-Fi Password here if not using BLE
-#define DEFAULT_SERVER_HOST    "192.168.31.54"   // Your PC's Local IP
+#define DEFAULT_SERVER_HOST    "192.168.31.53"   // Your PC's Local IP
 #define DEFAULT_SERVER_PORT    5000
 #define DEFAULT_MQTT_PORT      1883
 

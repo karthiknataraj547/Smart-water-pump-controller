@@ -132,7 +132,7 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
               <Server className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="http://192.168.31.54:5000"
+                placeholder="http://192.168.31.53:5000"
                 value={gatewayInput}
                 onChange={(e) => {
                   setGatewayInput(e.target.value);
@@ -159,11 +159,11 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
               <button
                 type="button"
-                onClick={() => setPreset('http://192.168.31.54:5000')}
+                onClick={() => setPreset('http://192.168.31.53:5000')}
                 className="neu-btn px-3 py-2 text-left text-[11px] rounded-xl text-cyan-400 hover:text-cyan-300 flex items-center justify-between"
               >
                 <span>Home Wi-Fi LAN</span>
-                <span className="text-[9px] text-slate-400">192.168.31.54</span>
+                <span className="text-[9px] text-slate-400">192.168.31.53</span>
               </button>
 
               <button
