@@ -20,6 +20,7 @@ export const UserApp: React.FC = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [otaStatus, setOtaStatus] = useState<string>('');
 
   const isRunning = isDeviceOnline && pumpStatus?.pump_state === 'ON';
@@ -41,11 +42,13 @@ export const UserApp: React.FC = () => {
 
   return (
     <div className="min-h-screen flex transition-colors duration-200" style={{ backgroundColor: 'var(--neu-bg)' }}>
-      {/* Left Navigation Sidebar (User / Operator Only) */}
+      {/* Navigation Sidebar (Desktop + Mobile Slide-Out Drawer) */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         unackAlertsCount={unackAlerts}
+        mobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
       />
 
       {/* Main Content Viewport */}
@@ -53,6 +56,7 @@ export const UserApp: React.FC = () => {
         <TopBar
           onOpenAuth={() => setShowAuthModal(true)}
           onOpenAlerts={() => setActiveTab('alerts')}
+          onToggleMobileMenu={() => setMobileMenuOpen(prev => !prev)}
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">

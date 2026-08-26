@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User } from '../types';
 import { ApiService } from '../services/api';
 
@@ -17,38 +17,59 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('pump_auth_token'));
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('pump_auth_token');
+  });
   const [loading, setLoading] = useState<boolean>(true);
 
+  const logout = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('pump_auth_token');
+    }
+    setToken(null);
+    setUser(null);
+  }, []);
+
   useEffect(() => {
+    let isMounted = true;
     async function loadUser() {
-      if (token) {
-        try {
-          const profile = await ApiService.getProfile();
+      if (!token) {
+        if (isMounted) {
+          setUser(null);
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const profile = await ApiService.getProfile();
+        if (isMounted) {
           setUser(profile);
-        } catch (err) {
-          console.warn('[Auth] Token invalid or expired, clearing session');
+        }
+      } catch (err) {
+        console.warn('[Auth] Token invalid or session expired, clearing credentials');
+        if (isMounted) {
           logout();
         }
-      } else {
-        // Automatically establish session for seamless local operation
-        try {
-          const res = await ApiService.login('admin@waterpump.io', 'Admin@123456');
-          localStorage.setItem('pump_auth_token', res.token);
-          setToken(res.token);
-          setUser(res.user);
-        } catch (err) {
-          console.warn('[Auth] Auto-session initialization note:', err);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
         }
       }
-      setLoading(false);
     }
+
     loadUser();
-  }, [token]);
+    return () => {
+      isMounted = false;
+    };
+  }, [token, logout]);
 
   const login = async (email: string, pass: string) => {
     const res = await ApiService.login(email, pass);
-    localStorage.setItem('pump_auth_token', res.token);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('pump_auth_token', res.token);
+    }
     setToken(res.token);
     setUser(res.user);
   };
@@ -58,22 +79,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (res.user.role !== 'admin') {
       throw new Error('ACCESS DENIED: Administrator role clearance required for Admin Portal.');
     }
-    localStorage.setItem('pump_auth_token', res.token);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('pump_auth_token', res.token);
+    }
     setToken(res.token);
     setUser(res.user);
   };
 
   const register = async (name: string, email: string, pass: string, phone?: string) => {
     const res = await ApiService.register(name, email, pass, phone);
-    localStorage.setItem('pump_auth_token', res.token);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('pump_auth_token', res.token);
+    }
     setToken(res.token);
     setUser(res.user);
-  };
-
-  const logout = () => {
-    localStorage.removeItem('pump_auth_token');
-    setToken(null);
-    setUser(null);
   };
 
   const isAdmin = user?.role === 'admin';
