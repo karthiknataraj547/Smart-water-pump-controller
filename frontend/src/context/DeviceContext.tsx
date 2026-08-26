@@ -171,21 +171,31 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       mqttClientRef.current = client;
 
       client.on('connect', () => {
-        console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to topics...');
+        console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to AquaControl topics...');
         setMqttConnected(true);
-        client.subscribe('devices/#');
-        client.subscribe('aquacontrol/#');
-        client.subscribe('devices/+/telemetry');
-        client.subscribe('devices/+/ack');
-        client.subscribe('devices/+/status');
-        client.subscribe('devices/+/alerts');
+        // Subscribe targetedly to AquaControl and our device to avoid public traffic flood
+        client.subscribe('aquacontrol/WPC-A81F29/#');
+        client.subscribe('aquacontrol/v1/devices/WPC-A81F29/#');
+        client.subscribe('devices/WPC-A81F29/#');
+        client.subscribe('aquacontrol/telemetry');
+        client.subscribe('aquacontrol/status');
+        client.subscribe('aquacontrol/ack');
       });
 
       client.on('message', (topic: string, message: Buffer) => {
         try {
           const payloadStr = message.toString();
           const data = JSON.parse(payloadStr);
-          console.log(`[MQTT Inbound] Topic: '${topic}'`, data);
+
+          // STRICT FILTER: Discard public messages from other strangers' devices
+          const isOurDevice = topic.includes('WPC-A81F29') || 
+                              topic.startsWith('aquacontrol') || 
+                              data.device_uid === 'WPC-A81F29' || 
+                              data.deviceUid === 'WPC-A81F29';
+
+          if (!isOurDevice) return;
+
+          console.log(`%c[AquaControl LIVE HW] Topic: '${topic}'`, 'color: #10b981; font-weight: bold;', data);
 
           let deviceUid = data.device_uid || data.deviceUid || 'WPC-A81F29';
           let subTopic = '';
@@ -202,7 +212,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             if (parts.length >= 5) {
               deviceUid = parts[3];
               subTopic = parts[4];
-            } else if (parts.length >= 3) {
+            } else if (parts.length >= 2) {
               subTopic = parts[parts.length - 1];
             }
           }

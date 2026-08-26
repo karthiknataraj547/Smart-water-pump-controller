@@ -987,7 +987,8 @@ void TaskNetworkLoop(void *parameter) {
 
                     String clientId = String("ESP32_") + DEVICE_UID + "_" + String(random(1000, 9999));
                     String lwtTopic1 = String("devices/") + DEVICE_UID + "/status";
-                    String lwtTopic2 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/status";
+                    String lwtTopic2 = String("aquacontrol/") + DEVICE_UID + "/status";
+                    String lwtTopic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/status";
                     String lwtPayload = "{\"status\":\"offline\",\"device_uid\":\"" + String(DEVICE_UID) + "\"}";
 
                     Serial.printf("[MQTT] Connecting to '%s:%d' (Client: %s)...\n",
@@ -1003,17 +1004,20 @@ void TaskNetworkLoop(void *parameter) {
                         mqttConnected = true;
                         Serial.println("[MQTT] ✓ Connected to Cloud MQTT Broker!");
 
-                        // Publish instant online message on both topics
+                        // Publish instant online message on all topics
                         String onlinePayload = "{\"status\":\"online\",\"device_uid\":\"" + String(DEVICE_UID) + "\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"rssi\":" + String(WiFi.RSSI()) + "}";
                         mqttClient.publish(lwtTopic1.c_str(), onlinePayload.c_str(), true);
                         mqttClient.publish(lwtTopic2.c_str(), onlinePayload.c_str(), true);
+                        mqttClient.publish(lwtTopic3.c_str(), onlinePayload.c_str(), true);
 
-                        // Subscribe to pump commands on both namespaces
+                        // Subscribe to pump commands on all namespaces
                         String cmdTopic1 = String("devices/") + DEVICE_UID + "/commands";
-                        String cmdTopic2 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/commands";
+                        String cmdTopic2 = String("aquacontrol/") + DEVICE_UID + "/commands";
+                        String cmdTopic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/commands";
                         mqttClient.subscribe(cmdTopic1.c_str(), 0);
                         mqttClient.subscribe(cmdTopic2.c_str(), 0);
-                        Serial.printf("[MQTT] Subscribed to: '%s' and '%s'\n", cmdTopic1.c_str(), cmdTopic2.c_str());
+                        mqttClient.subscribe(cmdTopic3.c_str(), 0);
+                        Serial.printf("[MQTT] Subscribed to: '%s', '%s', '%s'\n", cmdTopic1.c_str(), cmdTopic2.c_str(), cmdTopic3.c_str());
                     } else {
                         mqttConnected = false;
                         Serial.printf("[MQTT] Connection attempt failed (rc=%d). Retrying in 3s...\n", mqttClient.state());
@@ -1060,9 +1064,11 @@ void TaskNetworkLoop(void *parameter) {
                     char buffer[512];
                     serializeJson(doc, buffer);
                     String topic1 = String("devices/") + DEVICE_UID + "/telemetry";
-                    String topic2 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/telemetry";
+                    String topic2 = String("aquacontrol/") + DEVICE_UID + "/telemetry";
+                    String topic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/telemetry";
                     mqttClient.publish(topic1.c_str(), buffer);
                     mqttClient.publish(topic2.c_str(), buffer);
+                    mqttClient.publish(topic3.c_str(), buffer);
                 }
             }
 
