@@ -10,13 +10,13 @@ export const ProjectorView: React.FC = () => {
     startPump,
     stopPump,
     emergencyStop,
-    commandPending
+    commandPending,
+    isDeviceOnline
   } = useDevice();
 
   const [displayMode, setDisplayMode] = useState<'projector' | 'monitoring' | 'control'>('projector');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
-  const isDeviceOnline = selectedDevice?.status === 'online';
   const isRunning = isDeviceOnline && pumpStatus?.pump_state === 'ON';
   const isFault = isDeviceOnline && pumpStatus?.pump_state === 'FAULT';
   const waterPct = isDeviceOnline ? Number(telemetry?.water_level_percentage ?? 0) : 0;

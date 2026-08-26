@@ -13,10 +13,10 @@ export const PumpControlCard: React.FC = () => {
     emergencyStop,
     commandPending,
     commandStatusText,
-    selectedDevice
+    selectedDevice,
+    isDeviceOnline
   } = useDevice();
 
-  const isDeviceOnline = selectedDevice?.status === 'online';
   const isRunning = isDeviceOnline && pumpStatus?.pump_state === 'ON';
   const isFault = isDeviceOnline && pumpStatus?.pump_state === 'FAULT';
   const currentMode = pumpStatus?.mode || 'AUTOMATIC';

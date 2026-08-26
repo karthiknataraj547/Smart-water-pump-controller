@@ -3,9 +3,8 @@ import { useDevice } from '../../context/DeviceContext';
 import { Droplet, Waves, Radio, Sparkles } from 'lucide-react';
 
 export const SensorGrid: React.FC = () => {
-  const { telemetry, selectedDevice } = useDevice();
+  const { telemetry, isDeviceOnline } = useDevice();
 
-  const isDeviceOnline = selectedDevice?.status === 'online';
   const inflowRate = isDeviceOnline ? (telemetry?.inflow_rate_lpm || 0) : 0;
   const totalLiters = isDeviceOnline ? (telemetry?.total_inflow_liters || 0) : 0;
   const tdsPpm = isDeviceOnline ? (telemetry?.tds_ppm || 0) : 0;

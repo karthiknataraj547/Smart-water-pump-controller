@@ -16,13 +16,12 @@ import { Cpu, UploadCloud } from 'lucide-react';
 import { ApiService } from './services/api';
 
 export const UserApp: React.FC = () => {
-  const { selectedDevice, pumpStatus, telemetry, alerts } = useDevice();
+  const { selectedDevice, pumpStatus, telemetry, alerts, isDeviceOnline } = useDevice();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [otaStatus, setOtaStatus] = useState<string>('');
 
-  const isDeviceOnline = selectedDevice?.status === 'online';
   const isRunning = isDeviceOnline && pumpStatus?.pump_state === 'ON';
   const waterPct = isDeviceOnline ? Number(telemetry?.water_level_percentage ?? 0) : 0;
   const volumeLiters = isDeviceOnline ? Number(telemetry?.water_level_liters ?? 0) : 0;
