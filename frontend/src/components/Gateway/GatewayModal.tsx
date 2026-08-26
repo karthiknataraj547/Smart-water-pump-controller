@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDevice } from '../../context/DeviceContext';
-import { Network, Server, CheckCircle2, AlertCircle, RefreshCw, X, Radio, ArrowRight } from 'lucide-react';
-import { setCustomGatewayUrl } from '../../services/api';
+import { Network, Server, CheckCircle2, AlertCircle, Radio, X, Cpu } from 'lucide-react';
+import { setCustomGatewayUrl, getCustomGatewayUrl } from '../../services/api';
 
 interface GatewayModalProps {
   isOpen: boolean;
@@ -9,13 +9,13 @@ interface GatewayModalProps {
 }
 
 export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) => {
-  const { wsConnected, isDeviceOnline, refreshDevices, reconnectWs } = useDevice();
-  const [gatewayInput, setGatewayInput] = useState<string>(() => localStorage.getItem('pump_custom_gateway') || '');
+  const { wsConnected, mqttConnected, isDeviceOnline, refreshDevices, reconnectWs } = useDevice();
+  const [gatewayInput, setGatewayInput] = useState<string>(() => getCustomGatewayUrl());
   const [testing, setTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
-    setGatewayInput(localStorage.getItem('pump_custom_gateway') || '');
+    setGatewayInput(getCustomGatewayUrl());
     setTestResult(null);
   }, [isOpen]);
 
@@ -24,7 +24,7 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
   const handleTestConnection = async (targetUrl: string) => {
     const cleanUrl = targetUrl.trim().replace(/\/$/, '');
     if (!cleanUrl) {
-      setTestResult({ success: true, message: 'Default auto-detection will be used.' });
+      setTestResult({ success: true, message: 'Default cloud MQTT broker (broker.emqx.io) is active.' });
       return;
     }
 
@@ -63,6 +63,7 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
   const handleSaveAndApply = async () => {
     const cleanUrl = gatewayInput.trim().replace(/\/$/, '');
     setCustomGatewayUrl(cleanUrl || null);
+    localStorage.setItem('pump_custom_gateway', cleanUrl || '');
     await reconnectWs();
     await refreshDevices();
     onClose();
@@ -89,34 +90,44 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
             <Network className="w-7 h-7" />
           </div>
           <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[10px] font-mono font-bold uppercase tracking-wider mb-2">
-            <span>LIVE GATEWAY EXTENSION POINTER</span>
+            <span>MULTI-CHANNEL MQTT & GATEWAY ROUTER</span>
           </div>
           <h3 className="text-xl font-bold uppercase" style={{ fontFamily: 'var(--font-display)' }}>
-            Hardware Gateway Connection
+            Hardware & Cloud Connection
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            Point your cloud/Vercel dashboard directly to your local ESP32 hardware server.
+            Connects to your ESP32 hardware via universal Cloud MQTT (<span className="text-cyan-400 font-mono">broker.emqx.io:1883</span>) or Local LAN Gateway.
           </p>
         </div>
 
         {/* Live Status Rack */}
-        <div className="grid grid-cols-2 gap-3 mb-5 text-xs font-mono">
-          <div className="neu-screen p-3 rounded-2xl flex flex-col items-center">
-            <span className="text-[10px] text-slate-400 uppercase">CLOUD HUB LINK</span>
-            <div className="flex items-center space-x-1.5 mt-1">
-              <span className={`w-2.5 h-2.5 rounded-full neu-dot ${wsConnected ? 'neu-dot-emerald animate-pulse' : 'neu-dot-rose'}`} />
-              <span className={`font-bold ${wsConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {wsConnected ? 'CONNECTED' : 'DISCONNECTED'}
+        <div className="grid grid-cols-3 gap-2 mb-5 text-xs font-mono">
+          <div className="neu-screen p-2.5 rounded-2xl flex flex-col items-center text-center">
+            <span className="text-[9px] text-slate-400 uppercase">CLOUD MQTT</span>
+            <div className="flex items-center space-x-1 mt-1">
+              <span className={`w-2 h-2 rounded-full neu-dot ${mqttConnected ? 'neu-dot-emerald animate-pulse' : 'neu-dot-rose'}`} />
+              <span className={`font-bold text-[10px] ${mqttConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {mqttConnected ? 'CONNECTED' : 'DISCONNECTED'}
               </span>
             </div>
           </div>
 
-          <div className="neu-screen p-3 rounded-2xl flex flex-col items-center">
-            <span className="text-[10px] text-slate-400 uppercase">ESP32 HARDWARE</span>
-            <div className="flex items-center space-x-1.5 mt-1">
-              <span className={`w-2.5 h-2.5 rounded-full neu-dot ${isDeviceOnline ? 'neu-dot-emerald animate-pulse' : 'neu-dot-rose'}`} />
-              <span className={`font-bold ${isDeviceOnline ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {isDeviceOnline ? 'ONLINE (LIVE)' : 'OFFLINE (0%)'}
+          <div className="neu-screen p-2.5 rounded-2xl flex flex-col items-center text-center">
+            <span className="text-[9px] text-slate-400 uppercase">GATEWAY WS</span>
+            <div className="flex items-center space-x-1 mt-1">
+              <span className={`w-2 h-2 rounded-full neu-dot ${wsConnected ? 'neu-dot-emerald animate-pulse' : 'neu-dot-slate'}`} />
+              <span className={`font-bold text-[10px] ${wsConnected ? 'text-emerald-400' : 'text-slate-400'}`}>
+                {wsConnected ? 'LOCAL LINK' : 'STANDBY'}
+              </span>
+            </div>
+          </div>
+
+          <div className="neu-screen p-2.5 rounded-2xl flex flex-col items-center text-center">
+            <span className="text-[9px] text-slate-400 uppercase">ESP32 NODE</span>
+            <div className="flex items-center space-x-1 mt-1">
+              <span className={`w-2 h-2 rounded-full neu-dot ${isDeviceOnline ? 'neu-dot-emerald animate-pulse' : 'neu-dot-rose'}`} />
+              <span className={`font-bold text-[10px] ${isDeviceOnline ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {isDeviceOnline ? 'LIVE ONLINE' : 'WAITING LINK'}
               </span>
             </div>
           </div>
@@ -126,7 +137,7 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-bold uppercase text-slate-400 mb-1 font-mono">
-              Gateway Target URL (IP:Port / Host)
+              Custom LAN Gateway URL (Optional)
             </label>
             <div className="relative">
               <Server className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
@@ -154,7 +165,7 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
           {/* Quick Preset Buttons */}
           <div>
             <span className="block text-[10px] uppercase font-mono text-slate-400 mb-1.5 font-bold">
-              Quick Connect Presets:
+              Quick Presets:
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
               <button
@@ -162,7 +173,7 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
                 onClick={() => setPreset('http://192.168.31.53:5000')}
                 className="neu-btn px-3 py-2 text-left text-[11px] rounded-xl text-cyan-400 hover:text-cyan-300 flex items-center justify-between"
               >
-                <span>Home Wi-Fi LAN</span>
+                <span>Local LAN IP</span>
                 <span className="text-[9px] text-slate-400">192.168.31.53</span>
               </button>
 
@@ -175,6 +186,20 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
                 <span className="text-[9px] text-slate-400">127.0.0.1:5000</span>
               </button>
             </div>
+          </div>
+
+          {/* Hardware Connection Guide Alert */}
+          <div className="p-3.5 rounded-2xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs font-mono space-y-1">
+            <div className="flex items-center space-x-1.5 font-bold text-cyan-400">
+              <Cpu className="w-4 h-4" />
+              <span>HOW TO CONNECT HARDWARE TO WI-FI:</span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              1. On your phone/PC, connect to Wi-Fi hotspot <strong className="text-cyan-300">"AquaControl-Setup"</strong> (Password: <strong className="text-cyan-300">setup1234</strong>).<br/>
+              2. Open <strong className="text-cyan-300">http://192.168.4.1</strong> in your browser.<br/>
+              3. Select your home Wi-Fi and click <strong className="text-cyan-300">Save & Connect</strong>.<br/>
+              4. The hardware connects to <strong className="text-cyan-300">broker.emqx.io</strong> and links live with this dashboard!
+            </p>
           </div>
 
           {testResult && (
@@ -194,7 +219,7 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
               style={{ fontFamily: 'var(--font-display)' }}
             >
               <Radio className="w-4 h-4" />
-              <span>SAVE & CONNECT TO GATEWAY</span>
+              <span>SAVE & APPLY CONFIGURATION</span>
             </button>
           </div>
         </div>

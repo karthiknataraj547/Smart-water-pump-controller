@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { Device, PumpStatus, SensorReading, Alert, AutomationRule } from '../types';
-import { ApiService } from '../services/api';
+import { ApiService, getCustomGatewayUrl } from '../services/api';
 import { useAuth } from './AuthContext';
+import mqtt, { MqttClient } from 'mqtt';
 
 interface DeviceContextType {
   devices: Device[];
@@ -12,6 +13,7 @@ interface DeviceContextType {
   alerts: Alert[];
   rules: AutomationRule[];
   wsConnected: boolean;
+  mqttConnected: boolean;
   isDeviceOnline: boolean;
   commandPending: boolean;
   commandStatusText: string;
@@ -28,9 +30,9 @@ interface DeviceContextType {
 const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
 
 function getWsUrl(token: string | null): string | null {
-  const custom = localStorage.getItem('pump_custom_gateway');
-  if (custom) {
-    const clean = custom.replace(/^http/, 'ws');
+  const custom = getCustomGatewayUrl() || localStorage.getItem('pump_custom_gateway');
+  if (custom && custom.trim().length > 0) {
+    const clean = custom.trim().replace(/^http/, 'ws');
     return `${clean}/ws?token=${token || ''}&clientType=web`;
   }
 
@@ -40,10 +42,12 @@ function getWsUrl(token: string | null): string | null {
     return `${clean}/ws?token=${token || ''}&clientType=web`;
   }
 
-  const host = window.location.hostname || 'localhost';
-  if (host === 'localhost' || host === '127.0.0.1' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${host}:5000/ws?token=${token || ''}&clientType=web`;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname || 'localhost';
+    if (host === 'localhost' || host === '127.0.0.1' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${host}:5000/ws?token=${token || ''}&clientType=web`;
+    }
   }
 
   return null;
@@ -58,6 +62,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
+  const [mqttConnected, setMqttConnected] = useState<boolean>(false);
   const [commandPending, setCommandPending] = useState<boolean>(false);
   const [commandStatusText, setCommandStatusText] = useState<string>('');
   
@@ -66,6 +71,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [nowTick, setNowTick] = useState<number>(Date.now());
 
   const wsRef = useRef<WebSocket | null>(null);
+  const mqttClientRef = useRef<MqttClient | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // 1-second interval tick to continuously check heartbeat freshness
@@ -75,13 +81,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   // Strict Physical Device Online State Check:
-  // Hardware is ONLY online if WebSocket is connected, device status is online,
-  // AND real telemetry was received within the last 7 seconds.
+  // Hardware is online if MQTT/WS is connected and telemetry was received within last 15 seconds,
+  // or reported online with fresh heartbeat.
   const isDeviceOnline = Boolean(
-    wsConnected &&
-    selectedDevice?.status === 'online' &&
+    (wsConnected || mqttConnected) &&
+    (selectedDevice?.status === 'online' || (nowTick - lastTelemetryTimestamp < 15000)) &&
     lastTelemetryTimestamp > 0 &&
-    (nowTick - lastTelemetryTimestamp < 7000)
+    (nowTick - lastTelemetryTimestamp < 15000)
   );
 
   // Load devices on auth change
@@ -118,12 +124,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ApiService.getAutomationRules(deviceId)
       ]);
 
-      if (pStatus.status === 'fulfilled') setPumpStatus(pStatus.value);
-      if (tReading.status === 'fulfilled') {
+      if (pStatus.status === 'fulfilled' && pStatus.value) setPumpStatus(pStatus.value);
+      if (tReading.status === 'fulfilled' && tReading.value) {
         setTelemetry(tReading.value);
       }
-      if (aList.status === 'fulfilled') setAlerts(aList.value);
-      if (rList.status === 'fulfilled') setRules(rList.value);
+      if (aList.status === 'fulfilled' && aList.value) setAlerts(aList.value);
+      if (rList.status === 'fulfilled' && rList.value) setRules(rList.value);
     } catch (err) {
       console.warn('[DeviceContext] Error loading device details:', err);
     }
@@ -145,7 +151,119 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [selectedDevice]);
 
-  // Connect WebSocket
+  // =========================================================================
+  // CLOUD MQTT DIRECT WEBSOCKET CONNECTION (wss://broker.emqx.io:8084/mqtt)
+  // =========================================================================
+  useEffect(() => {
+    const brokerWsUrl = 'wss://broker.emqx.io:8084/mqtt';
+    console.log('[MQTT] Connecting browser MQTT client to:', brokerWsUrl);
+
+    try {
+      const client = mqtt.connect(brokerWsUrl, {
+        clientId: `AquaControl_Web_${Math.random().toString(16).substring(2, 8)}`,
+        reconnectPeriod: 4000,
+        connectTimeout: 8000
+      });
+      mqttClientRef.current = client;
+
+      client.on('connect', () => {
+        console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)!');
+        setMqttConnected(true);
+        client.subscribe('devices/+/telemetry');
+        client.subscribe('devices/+/ack');
+        client.subscribe('devices/+/status');
+      });
+
+      client.on('message', (topic: string, message: Buffer) => {
+        try {
+          const payloadStr = message.toString();
+          const data = JSON.parse(payloadStr);
+          const parts = topic.split('/');
+          const deviceUid = parts[1] || 'WPC-A81F29';
+          const subTopic = parts[2] || '';
+
+          if (subTopic === 'telemetry') {
+            const now = Date.now();
+            setLastTelemetryTimestamp(now);
+            setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
+            setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
+
+            setTelemetry({
+              id: `tel_${now}`,
+              device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+              water_level_percentage: Number(data.water_level_percentage ?? data.water_level_pct ?? 0),
+              water_level_liters: Number(data.water_level_liters ?? 0),
+              inflow_rate_lpm: Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? 0),
+              total_inflow_liters: Number(data.total_inflow_liters ?? 0),
+              tds_ppm: Number(data.tds_ppm ?? 0),
+              temperature_c: Number(data.temperature_c ?? 25),
+              sensor_status: data.sensor_status || 'HEALTHY',
+              created_at: new Date(now).toISOString()
+            });
+
+            if (typeof data.pump_running === 'boolean') {
+              setPumpStatus(prev => ({
+                ...(prev || {
+                  id: 'ps_live',
+                  device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                  mode: 'AUTOMATIC',
+                  runtime_seconds: 0,
+                  changed_at: new Date().toISOString(),
+                  changed_by: 'HARDWARE_TELEMETRY'
+                }),
+                pump_state: data.pump_running ? 'ON' : 'OFF',
+                current_draw_amps: Number(data.current_amps ?? (data.pump_running ? 4.8 : 0.0)),
+                runtime_seconds: Number(data.runtime_seconds ?? prev?.runtime_seconds ?? 0)
+              }));
+            }
+          } else if (subTopic === 'ack') {
+            const confirmedState = data.confirmed_state || (data.status === 'successful' ? 'ON' : 'OFF');
+            setPumpStatus(prev => ({
+              ...(prev || {
+                id: 'ps_live',
+                device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                mode: 'AUTOMATIC',
+                runtime_seconds: 0,
+                changed_at: new Date().toISOString(),
+                changed_by: 'HARDWARE_ACK'
+              }),
+              pump_state: confirmedState === 'ON' ? 'ON' : confirmedState === 'EMERGENCY_STOP' ? 'FAULT' : 'OFF',
+              current_draw_amps: Number(data.current_amps ?? (confirmedState === 'ON' ? 4.8 : 0.0)),
+              runtime_seconds: Number(data.runtime_seconds ?? prev?.runtime_seconds ?? 0)
+            }));
+            setCommandPending(false);
+            setCommandStatusText(`Hardware Confirmed: ${confirmedState}`);
+            setTimeout(() => setCommandStatusText(''), 2500);
+          } else if (subTopic === 'status') {
+            const st = data.status === 'online' ? 'online' : 'offline';
+            setSelectedDevice(prev => prev ? { ...prev, status: st } : prev);
+            setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: st } : d));
+          }
+        } catch (e) {}
+      });
+
+      client.on('error', (err) => {
+        console.warn('[MQTT] Browser MQTT client error:', err.message);
+      });
+
+      client.on('close', () => {
+        setMqttConnected(false);
+      });
+    } catch (e) {
+      console.warn('[MQTT] Could not initialize browser MQTT client:', e);
+    }
+
+    return () => {
+      if (mqttClientRef.current) {
+        mqttClientRef.current.end(true);
+        mqttClientRef.current = null;
+      }
+    };
+  }, [selectedDevice?.id]);
+
+  // =========================================================================
+  // LOCAL GATEWAY WEBSOCKET CONNECTION
+  // =========================================================================
   const connectWs = useCallback(() => {
     const wsUrl = getWsUrl(token);
     if (!wsUrl) {
@@ -160,13 +278,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       wsRef.current = null;
     }
 
-    console.log('[WS] Connecting to real-time gateway at:', wsUrl);
     try {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('[WS] Connected to Gateway Hub!');
+        console.log('[WS] Connected to Local Gateway Hub!');
         setWsConnected(true);
       };
 
@@ -174,9 +291,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         try {
           const msg = JSON.parse(event.data);
           handleWebSocketMessage(msg);
-        } catch (e) {
-          console.warn('[WS] Non-JSON message received:', event.data);
-        }
+        } catch (e) {}
       };
 
       ws.onclose = () => {
@@ -236,7 +351,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setDevices(prev => prev.map(d => d.device_uid === data.deviceUid ? { ...d, status: 'online' } : d));
       
       if (!selectedDevice || data.deviceUid === selectedDevice.device_uid) {
-        setTelemetry(prev => ({
+        setTelemetry({
           id: data.readingId || 'latest',
           device_id: data.deviceId || selectedDevice?.id || '',
           water_level_percentage: data.waterLevelPercentage,
@@ -247,7 +362,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           temperature_c: data.temperatureC,
           sensor_status: data.sensorStatus || 'HEALTHY',
           created_at: data.timestamp || new Date().toISOString()
-        }));
+        });
       }
     } else if (event === 'PUMP_STATE_CHANGED') {
       setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
@@ -263,15 +378,35 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  // Helper to publish direct MQTT command
+  const publishDirectMqttCommand = (cmdType: string, actionStr: string, payload: any = {}) => {
+    if (mqttClientRef.current && mqttClientRef.current.connected) {
+      const topic = `devices/${selectedDevice?.device_uid || 'WPC-A81F29'}/commands`;
+      const cmdPayload = JSON.stringify({
+        command_id: `cmd_${Date.now()}`,
+        command_type: cmdType,
+        action: actionStr,
+        payload,
+        source: 'web_mqtt_direct',
+        timestamp: Date.now()
+      });
+      mqttClientRef.current.publish(topic, cmdPayload, { qos: 1 });
+      console.log(`[MQTT Direct] Published ${cmdType} to topic '${topic}'`);
+    }
+  };
+
   // Pump Command Actions
   const startPump = async () => {
     if (!selectedDevice) return;
     const previousState = pumpStatus;
     setCommandPending(true);
-    setCommandStatusText('Energizing Relay Contactor (Active LOW)...');
+    setCommandStatusText('Energizing Relay Contactor via MQTT...');
 
     // Optimistic UI update
     setPumpStatus(prev => prev ? { ...prev, pump_state: 'ON', current_draw_amps: 4.8 } : null);
+
+    // Direct MQTT Command dispatch
+    publishDirectMqttCommand('START_PUMP', 'START');
 
     try {
       await ApiService.startPump(selectedDevice.id, user?.email || 'web_operator');
@@ -292,10 +427,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (!selectedDevice) return;
     const previousState = pumpStatus;
     setCommandPending(true);
-    setCommandStatusText('De-energizing Contactor Interlock...');
+    setCommandStatusText('De-energizing Contactor via MQTT...');
 
     // Optimistic UI update
     setPumpStatus(prev => prev ? { ...prev, pump_state: 'OFF', current_draw_amps: 0.0 } : null);
+
+    // Direct MQTT Command dispatch
+    publishDirectMqttCommand('STOP_PUMP', 'STOP');
 
     try {
       await ApiService.stopPump(selectedDevice.id, user?.email || 'web_operator');
@@ -317,6 +455,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const previousMode = pumpStatus?.mode;
     setPumpStatus(prev => prev ? { ...prev, mode: mode as any } : null);
 
+    publishDirectMqttCommand('SET_MODE', 'SET_MODE', { mode });
+
     try {
       await ApiService.setPumpMode(selectedDevice.id, mode, user?.email || 'web_operator');
     } catch (err: any) {
@@ -331,6 +471,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCommandStatusText('TRIPPING EMERGENCY MOTOR CUTOFF...');
 
     setPumpStatus(prev => prev ? { ...prev, pump_state: 'FAULT', current_draw_amps: 0.0 } : null);
+
+    publishDirectMqttCommand('EMERGENCY_STOP', 'EMERGENCY_STOP', { reason: reason || 'Operator UI E-Stop' });
 
     try {
       await ApiService.emergencyStop(selectedDevice.id, reason || 'Operator UI E-Stop');
@@ -366,6 +508,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         alerts,
         rules,
         wsConnected,
+        mqttConnected,
         isDeviceOnline,
         commandPending,
         commandStatusText,

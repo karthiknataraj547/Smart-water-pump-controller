@@ -24,8 +24,8 @@
 // Communication & Network
 #define ESPNOW_CHANNEL         1
 #define DEFAULT_MQTT_PORT      1883
-#define DEFAULT_MQTT_HOST      "192.168.1.100"  // Replaced during BLE provisioning
-#define DEFAULT_API_HOST       "192.168.1.100"
+#define DEFAULT_MQTT_HOST      "broker.emqx.io"
+#define DEFAULT_API_HOST       "192.168.31.53"
 #define DEFAULT_API_PORT       5000
 #define HEARTBEAT_INTERVAL_MS  5000
 #define SUBNODE_TIMEOUT_MS     30000            // 30 seconds without packet = Sub Node Lost

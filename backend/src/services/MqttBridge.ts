@@ -1,12 +1,13 @@
 import net from 'net';
 import Aedes from 'aedes';
+import mqtt, { MqttClient } from 'mqtt';
 import { ENV } from '../config/env';
-import { wsHub } from './WebSocketHub';
 
 export class MqttBridge {
   private static instance: MqttBridge;
   private aedesInstance?: any;
   private tcpServer?: net.Server;
+  private cloudClient?: MqttClient;
   private onTelemetryCallback?: (deviceUid: string, payload: any) => Promise<void>;
   private onAckCallback?: (deviceUid: string, ackData: any) => Promise<void>;
   private onStatusCallback?: (deviceUid: string, status: string) => Promise<void>;
@@ -21,6 +22,7 @@ export class MqttBridge {
   }
 
   public init(): void {
+    // 1. Initialize Embedded Aedes Broker (Local TCP Port 1883)
     try {
       this.aedesInstance = new (Aedes as any)();
       this.tcpServer = net.createServer(this.aedesInstance.handle);
@@ -31,9 +33,10 @@ export class MqttBridge {
 
       this.aedesInstance.on('client', (client: any) => {
         const clientId = client ? client.id : '';
-        console.log(`[MQTT] Hardware client connected: ${clientId}`);
+        console.log(`[MQTT] Hardware client connected to local broker: ${clientId}`);
         if (clientId && clientId.startsWith('ESP32_')) {
-          const uid = clientId.replace('ESP32_', '');
+          const parts = clientId.split('_');
+          const uid = parts[1] || 'WPC-A81F29';
           if (this.onStatusCallback) {
             this.onStatusCallback(uid, 'online');
           }
@@ -42,49 +45,78 @@ export class MqttBridge {
 
       this.aedesInstance.on('clientDisconnect', (client: any) => {
         const clientId = client ? client.id : '';
-        console.log(`[MQTT] Hardware client disconnected: ${clientId}`);
+        console.log(`[MQTT] Hardware client disconnected from local broker: ${clientId}`);
         if (clientId && clientId.startsWith('ESP32_')) {
-          const uid = clientId.replace('ESP32_', '');
+          const parts = clientId.split('_');
+          const uid = parts[1] || 'WPC-A81F29';
           if (this.onStatusCallback) {
             this.onStatusCallback(uid, 'offline');
           }
         }
       });
 
-      this.aedesInstance.on('publish', async (packet: any, client: any) => {
+      this.aedesInstance.on('publish', async (packet: any) => {
         if (!packet.topic || packet.topic.startsWith('$SYS/')) return;
-
-        const topic = packet.topic;
-        const payloadStr = packet.payload.toString();
-
-        try {
-          // Parse topic: devices/:device_uid/:action
-          const parts = topic.split('/');
-          if (parts[0] === 'devices' && parts.length >= 3) {
-            const deviceUid = parts[1];
-            const subTopic = parts[2];
-            const data = JSON.parse(payloadStr);
-
-            if (subTopic === 'telemetry') {
-              if (this.onTelemetryCallback) {
-                await this.onTelemetryCallback(deviceUid, data);
-              }
-            } else if (subTopic === 'ack') {
-              if (this.onAckCallback) {
-                await this.onAckCallback(deviceUid, data);
-              }
-            } else if (subTopic === 'status') {
-              if (this.onStatusCallback) {
-                await this.onStatusCallback(deviceUid, data.status || 'offline');
-              }
-            }
-          }
-        } catch (err: any) {
-          console.warn(`[MQTT] Error processing packet on topic ${topic}:`, err.message);
-        }
+        await this.handleIncomingTopicMessage(packet.topic, packet.payload.toString());
       });
     } catch (err: any) {
       console.warn('[MQTT] Embedded broker start failed:', err.message);
+    }
+
+    // 2. Initialize Cloud MQTT Bridge Client (broker.emqx.io:1883)
+    try {
+      const cloudBrokerUrl = process.env.CLOUD_MQTT_URL || 'mqtt://broker.emqx.io:1883';
+      console.log(`[MQTT] Connecting Cloud Bridge Client to ${cloudBrokerUrl}...`);
+      
+      this.cloudClient = mqtt.connect(cloudBrokerUrl, {
+        clientId: `AquaControl_Backend_Gateway_${Math.random().toString(16).substring(2, 8)}`,
+        reconnectPeriod: 5000,
+        connectTimeout: 10000
+      });
+
+      this.cloudClient.on('connect', () => {
+        console.log(`[MQTT] ✓ Cloud MQTT Bridge connected to ${cloudBrokerUrl}! Subscribing to device topics...`);
+        this.cloudClient?.subscribe('devices/+/telemetry');
+        this.cloudClient?.subscribe('devices/+/ack');
+        this.cloudClient?.subscribe('devices/+/status');
+      });
+
+      this.cloudClient.on('message', async (topic, payload) => {
+        await this.handleIncomingTopicMessage(topic, payload.toString());
+      });
+
+      this.cloudClient.on('error', (err) => {
+        console.warn('[MQTT] Cloud Bridge Client warning:', err.message);
+      });
+    } catch (err: any) {
+      console.warn('[MQTT] Cloud MQTT Bridge initialization warning:', err.message);
+    }
+  }
+
+  private async handleIncomingTopicMessage(topic: string, payloadStr: string): Promise<void> {
+    try {
+      const parts = topic.split('/');
+      if (parts[0] === 'devices' && parts.length >= 3) {
+        const deviceUid = parts[1];
+        const subTopic = parts[2];
+        const data = JSON.parse(payloadStr);
+
+        if (subTopic === 'telemetry') {
+          if (this.onTelemetryCallback) {
+            await this.onTelemetryCallback(deviceUid, data);
+          }
+        } else if (subTopic === 'ack') {
+          if (this.onAckCallback) {
+            await this.onAckCallback(deviceUid, data);
+          }
+        } else if (subTopic === 'status') {
+          if (this.onStatusCallback) {
+            await this.onStatusCallback(deviceUid, data.status || 'offline');
+          }
+        }
+      }
+    } catch (err: any) {
+      // Ignored non-JSON or invalid payload
     }
   }
 
@@ -99,23 +131,30 @@ export class MqttBridge {
   }
 
   public publishCommand(deviceUid: string, command: any): void {
-    if (!this.aedesInstance) return;
     const topic = `devices/${deviceUid}/commands`;
-    const payload = Buffer.from(JSON.stringify(command));
-    this.aedesInstance.publish({
-      cmd: 'publish',
-      qos: 1,
-      topic,
-      payload,
-      retain: false,
-      dup: false
-    }, (err: any) => {
-      if (err) {
-        console.error(`[MQTT] Failed to publish command to ${topic}:`, err);
-      } else {
-        console.log(`[MQTT] Published command to ${topic}:`, command);
-      }
-    });
+    const payloadBuffer = Buffer.from(JSON.stringify(command));
+
+    // 1. Publish to local Aedes Broker
+    if (this.aedesInstance) {
+      this.aedesInstance.publish({
+        cmd: 'publish',
+        qos: 1,
+        topic,
+        payload: payloadBuffer,
+        retain: false,
+        dup: false
+      }, (err: any) => {
+        if (err) console.error(`[MQTT] Local publish error to ${topic}:`, err);
+      });
+    }
+
+    // 2. Publish to Cloud Broker
+    if (this.cloudClient && this.cloudClient.connected) {
+      this.cloudClient.publish(topic, JSON.stringify(command), { qos: 1 }, (err) => {
+        if (err) console.error(`[MQTT] Cloud bridge publish error to ${topic}:`, err);
+        else console.log(`[MQTT] Cloud published command to ${topic}:`, command);
+      });
+    }
   }
 }
 

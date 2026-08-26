@@ -68,9 +68,14 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenAuth, onOpenAlerts, onTogg
         {/* Right Instrumentation Badges & Controls */}
         <div className="flex items-center space-x-2 sm:space-x-3">
           {/* Dedicated Physical Hardware Connection Badge */}
-          <div className={`flex items-center space-x-1.5 sm:space-x-2 neu-inset px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl transition-all ${
-            isDeviceOnline ? 'border border-emerald-500/30' : 'border border-rose-500/40 bg-rose-950/20'
-          }`}>
+          <button
+            type="button"
+            onClick={() => setShowGatewayModal(true)}
+            title="Click to view Multi-Channel MQTT & Gateway Diagnostics"
+            className={`flex items-center space-x-1.5 sm:space-x-2 neu-inset px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl transition-all cursor-pointer hover:border-cyan-500/50 ${
+              isDeviceOnline ? 'border border-emerald-500/30' : 'border border-rose-500/40 bg-rose-950/20'
+            }`}
+          >
             <span className={`w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full neu-dot ${
               isDeviceOnline ? 'neu-dot-emerald animate-pulse' : 'neu-dot-rose'
             }`} />
@@ -79,7 +84,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenAuth, onOpenAlerts, onTogg
             }`}>
               {isDeviceOnline ? 'HARDWARE ONLINE' : 'HARDWARE OFFLINE'}
             </span>
-          </div>
+          </button>
 
           {/* Gateway Extension Pointer Trigger */}
           <button
@@ -92,7 +97,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenAuth, onOpenAlerts, onTogg
           >
             <Network className="w-3.5 h-3.5" />
             <span className="text-[10px] font-mono font-bold">
-              {wsConnected ? 'GATEWAY LINKED' : 'SET GATEWAY'}
+              {wsConnected ? 'GATEWAY LINKED' : 'MQTT ROUTER'}
             </span>
           </button>
 
