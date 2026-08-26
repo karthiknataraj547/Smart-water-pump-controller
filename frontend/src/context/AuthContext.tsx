@@ -9,7 +9,7 @@ interface AuthContextType {
   isAdmin: boolean;
   login: (email: string, pass: string) => Promise<void>;
   loginAdmin: (email: string, pass: string) => Promise<void>;
-  register: (name: string, email: string, pass: string, phone?: string) => Promise<void>;
+  register: (name: string, email: string, pass: string, phone?: string, role?: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -86,8 +86,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(res.user);
   };
 
-  const register = async (name: string, email: string, pass: string, phone?: string) => {
-    const res = await ApiService.register(name, email, pass, phone);
+  const register = async (name: string, email: string, pass: string, phone?: string, role?: string) => {
+    const res = await ApiService.register(name, email, pass, phone, role);
     if (typeof window !== 'undefined') {
       localStorage.setItem('pump_auth_token', res.token);
     }

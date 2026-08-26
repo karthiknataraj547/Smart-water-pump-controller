@@ -391,10 +391,10 @@ export class ApiService {
     });
   }
 
-  static async register(name: string, email: string, password: string, phone?: string) {
+  static async register(name: string, email: string, password: string, phone?: string, role: string = 'operator') {
     return this.request('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password, phone })
+      body: JSON.stringify({ name, email, password, phone, role })
     });
   }
 
