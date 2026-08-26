@@ -15,7 +15,8 @@ import {
   AlertCircle,
   KeyRound,
   Wrench,
-  Radio
+  Radio,
+  ExternalLink
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -58,6 +59,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+
+    // Reject administrator logins on standard operator portal
+    if (!isRegister && email.trim().toLowerCase() === 'admin@waterpump.io') {
+      setErrorMsg('ADMINISTRATOR ACCESS: Please use the dedicated Admin Command Center at /admin.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -66,10 +74,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           throw new Error('Password must be at least 6 characters long.');
         }
         await register(name.trim(), email.trim(), password, phone.trim(), role);
-        setSuccessMsg('Account created successfully! Accessing station...');
+        setSuccessMsg('Operator account registered! Initializing station telemetry...');
       } else {
         await login(email.trim(), password);
-        setSuccessMsg('Authentication confirmed! Accessing controller...');
+        setSuccessMsg('Operator authentication confirmed! Accessing controller...');
       }
 
       setTimeout(() => {
@@ -85,13 +93,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const handleDemoUser = () => {
     setEmail('user@waterpump.io');
     setPassword('User@123456');
-    setIsRegister(false);
-    setErrorMsg('');
-  };
-
-  const handleDemoAdmin = () => {
-    setEmail('admin@waterpump.io');
-    setPassword('Admin@123456');
     setIsRegister(false);
     setErrorMsg('');
   };
@@ -137,16 +138,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
             <div className="inline-flex items-center space-x-1.5 px-3 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[10px] font-mono font-bold uppercase tracking-wider mb-1.5">
               <Sparkles className="w-3 h-3 text-cyan-300 animate-pulse" />
-              <span>INDUSTRIAL AUTH GATEWAY</span>
+              <span>OPERATOR AUTH GATEWAY</span>
             </div>
 
             <h3 className="text-lg sm:text-xl font-extrabold uppercase tracking-wide" style={{ fontFamily: 'var(--font-display)' }}>
-              {isRegister ? 'Create User Account' : 'Operator Sign In'}
+              {isRegister ? 'Create Operator Account' : 'Operator Sign In'}
             </h3>
             <p className="text-[11px] text-slate-400 font-mono mt-0.5">
               {isRegister 
-                ? 'Register a new operator profile with local controller permissions.'
-                : 'Sign in to access live IoT telemetry, pump switches & automation.'}
+                ? 'Register an operator profile to access live IoT pump controls.'
+                : 'Sign in to access your station pump switches & live automation.'}
             </p>
           </div>
 
@@ -201,15 +202,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1 font-mono">
                     Full Name / Operator Name
                   </label>
-                  <div className="relative">
-                    <User className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+                  <div className="relative flex items-center">
+                    <User className="absolute left-3.5 w-4 h-4 text-slate-400 pointer-events-none z-10" />
                     <input
                       type="text"
                       required
                       placeholder="e.g. John Doe"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full pl-10 neu-input text-xs font-mono py-2.5"
+                      className="w-full neu-input has-left-icon text-xs font-mono py-2.5"
                     />
                   </div>
                 </div>
@@ -218,14 +219,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1 font-mono">
                     Phone Number (Optional - For Alerts)
                   </label>
-                  <div className="relative">
-                    <Phone className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+                  <div className="relative flex items-center">
+                    <Phone className="absolute left-3.5 w-4 h-4 text-slate-400 pointer-events-none z-10" />
                     <input
                       type="tel"
                       placeholder="+1-555-0199"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      className="w-full pl-10 neu-input text-xs font-mono py-2.5"
+                      className="w-full neu-input has-left-icon text-xs font-mono py-2.5"
                     />
                   </div>
                 </div>
@@ -269,15 +270,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1 font-mono">
                 Email Address
               </label>
-              <div className="relative">
-                <Mail className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+              <div className="relative flex items-center">
+                <Mail className="absolute left-3.5 w-4 h-4 text-slate-400 pointer-events-none z-10" />
                 <input
                   type="email"
                   required
                   placeholder="operator@waterpump.io"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 neu-input text-xs font-mono py-2.5"
+                  className="w-full neu-input has-left-icon text-xs font-mono py-2.5"
                 />
               </div>
             </div>
@@ -294,20 +295,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   </span>
                 )}
               </div>
-              <div className="relative">
-                <Lock className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+              <div className="relative flex items-center">
+                <Lock className="absolute left-3.5 w-4 h-4 text-slate-400 pointer-events-none z-10" />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
                   placeholder="••••••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-10 neu-input text-xs font-mono py-2.5"
+                  className="w-full neu-input has-both-icons text-xs font-mono py-2.5"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-200 cursor-pointer"
+                  className="absolute right-3.5 text-slate-400 hover:text-slate-200 cursor-pointer z-10"
                   title={showPassword ? 'Hide Password' : 'Show Password'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -340,35 +341,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               ) : (
                 <>
                   <ShieldCheck className="w-4 h-4" />
-                  <span>{isRegister ? 'CREATE OPERATOR ACCOUNT' : 'SIGN IN TO GATEWAY'}</span>
+                  <span>{isRegister ? 'CREATE OPERATOR ACCOUNT' : 'SIGN IN AS OPERATOR'}</span>
                 </>
               )}
             </button>
           </form>
 
-          {/* Quick Demo Fill Presets (When in Sign In mode) */}
+          {/* Demo Operator Fill Preset (Sign In mode only) */}
           {!isRegister && (
-            <div className="mt-4 pt-3 border-t border-slate-700/20">
-              <span className="block text-center text-[10px] font-mono text-slate-500 uppercase tracking-wider mb-2">
-                Quick One-Click Logins:
-              </span>
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                <button
-                  type="button"
-                  onClick={handleDemoUser}
-                  className="neu-btn px-2.5 py-1.5 text-left text-[10px] rounded-xl text-cyan-400 hover:text-cyan-300 flex items-center justify-between cursor-pointer"
+            <div className="mt-4 pt-3 border-t border-slate-700/20 flex flex-col items-center space-y-2.5 text-xs font-mono">
+              <button
+                type="button"
+                onClick={handleDemoUser}
+                className="w-full neu-btn px-3 py-2 text-center text-[11px] rounded-xl text-cyan-400 hover:text-cyan-300 flex items-center justify-center space-x-2 cursor-pointer"
+              >
+                <span>Fill Demo Operator Credentials</span>
+                <span className="text-[9px] text-slate-500 font-mono">(user@waterpump.io)</span>
+              </button>
+
+              <div className="pt-2 text-[10px] text-slate-500 flex items-center space-x-1">
+                <span>Looking for Admin portal?</span>
+                <a
+                  href="/admin"
+                  className="text-amber-400 hover:underline flex items-center space-x-0.5 font-bold"
                 >
-                  <span>Operator</span>
-                  <span className="text-[9px] text-slate-500">user@</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDemoAdmin}
-                  className="neu-btn px-2.5 py-1.5 text-left text-[10px] rounded-xl text-amber-400 hover:text-amber-300 flex items-center justify-between cursor-pointer"
-                >
-                  <span>Admin</span>
-                  <span className="text-[9px] text-slate-500">admin@</span>
-                </button>
+                  <span>Go to Admin Center</span>
+                  <ExternalLink className="w-3 h-3 ml-0.5" />
+                </a>
               </div>
             </div>
           )}

@@ -331,6 +331,23 @@ body {
   transition: all 0.2s ease;
 }
 
+.neu-input.has-left-icon,
+.neu-input.pl-10,
+.neu-input.pl-11 {
+  padding-left: 42px !important;
+}
+
+.neu-input.has-right-icon,
+.neu-input.pr-10,
+.neu-input.pr-11 {
+  padding-right: 42px !important;
+}
+
+.neu-input.has-both-icons {
+  padding-left: 42px !important;
+  padding-right: 42px !important;
+}
+
 [data-theme='light'] .neu-input, .light .neu-input {
   color: #1e293b;
 }

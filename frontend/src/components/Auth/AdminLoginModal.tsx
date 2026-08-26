@@ -89,15 +89,15 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
             <label className="block text-[11px] font-bold uppercase text-slate-300 mb-1.5 font-mono">
               Admin Identity / Email
             </label>
-            <div className="relative">
-              <Mail className="absolute left-3.5 top-3 w-4 h-4 text-amber-400" />
+            <div className="relative flex items-center">
+              <Mail className="absolute left-3.5 w-4 h-4 text-amber-400 pointer-events-none z-10" />
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="admin@waterpump.io"
-                className="w-full pl-10 neu-input font-mono text-xs border-amber-500/20 focus:border-amber-400"
+                className="w-full neu-input has-left-icon font-mono text-xs border-amber-500/20 focus:border-amber-400 py-2.5"
               />
             </div>
           </div>
@@ -106,15 +106,15 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
             <label className="block text-[11px] font-bold uppercase text-slate-300 mb-1.5 font-mono">
               Root Password
             </label>
-            <div className="relative">
-              <KeyRound className="absolute left-3.5 top-3 w-4 h-4 text-amber-400" />
+            <div className="relative flex items-center">
+              <KeyRound className="absolute left-3.5 w-4 h-4 text-amber-400 pointer-events-none z-10" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
-                className="w-full pl-10 neu-input font-mono text-xs border-amber-500/20 focus:border-amber-400"
+                className="w-full neu-input has-left-icon font-mono text-xs border-amber-500/20 focus:border-amber-400 py-2.5"
               />
             </div>
           </div>
@@ -126,8 +126,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
               </label>
               <span className="text-[10px] text-amber-400/80 font-mono">Default: 9921</span>
             </div>
-            <div className="relative">
-              <Cpu className="absolute left-3.5 top-3 w-4 h-4 text-amber-400" />
+            <div className="relative flex items-center">
+              <Cpu className="absolute left-3.5 w-4 h-4 text-amber-400 pointer-events-none z-10" />
               <input
                 type="password"
                 maxLength={6}
@@ -135,7 +135,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
                 value={securityPin}
                 onChange={(e) => setSecurityPin(e.target.value)}
                 placeholder="9921"
-                className="w-full pl-10 neu-input font-mono tracking-widest text-xs border-amber-500/20 focus:border-amber-400"
+                className="w-full neu-input has-left-icon font-mono tracking-widest text-xs border-amber-500/20 focus:border-amber-400 py-2.5"
               />
             </div>
           </div>
