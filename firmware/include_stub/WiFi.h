@@ -59,9 +59,12 @@ public:
     String macAddress() { return "24:6F:28:A8:1F:29"; }
     int RSSI() { return -55; }
     int RSSI(int index) { return -55; }
+    int RSSI(uint8_t index) { return -55; }
     int scanNetworks() { return 0; }
     String SSID(int index) { return "WiFi_Network"; }
+    String SSID(uint8_t index) { return "WiFi_Network"; }
     wifi_auth_mode_t encryptionType(int index) { return WIFI_AUTH_WPA2_PSK; }
+    wifi_auth_mode_t encryptionType(uint8_t index) { return WIFI_AUTH_WPA2_PSK; }
     bool softAP(const char* ssid, const char* passphrase = NULL, int channel = 1, int ssid_hidden = 0) { return true; }
     bool softAPdisconnect(bool wifioff = false) { return true; }
     IPAddress softAPIP() { return IPAddress(); }

@@ -29,6 +29,7 @@ extern "C" {
     int strcmp(const char *s1, const char *s2);
     int strncmp(const char *s1, const char *s2, size_t n);
     char *strchr(const char *s, int c);
+    char *strstr(const char *haystack, const char *needle);
     void *memset(void *s, int c, size_t n);
     void *memcpy(void *dest, const void *src, size_t n);
     int snprintf(char *str, size_t size, const char *format, ...);
@@ -128,6 +129,14 @@ public:
         if (fromIndex >= strlen(_buffer)) return -1;
         const char* p = strchr(_buffer + fromIndex, ch);
         return p ? (int)(p - _buffer) : -1;
+    }
+    int indexOf(const char* s, unsigned int fromIndex = 0) const {
+        if (!s || fromIndex >= strlen(_buffer)) return -1;
+        const char* p = strstr(_buffer + fromIndex, s);
+        return p ? (int)(p - _buffer) : -1;
+    }
+    int indexOf(const String& s, unsigned int fromIndex = 0) const {
+        return indexOf(s.c_str(), fromIndex);
     }
     String substring(unsigned int from, unsigned int to = 0) const {
         size_t len = strlen(_buffer);

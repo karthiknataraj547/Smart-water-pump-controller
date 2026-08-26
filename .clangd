@@ -9,7 +9,6 @@ CompileFlags:
     - "-I../include_stub"
     - "-I../../include_stub"
     - "-I../../../include_stub"
-    - "-Id:/Smart water pump conroller/firmware/include_stub"
     - "-I./firmware/esp32-main-node/include"
     - "-I./firmware/esp8266-sub-node/include"
 Diagnostics:
