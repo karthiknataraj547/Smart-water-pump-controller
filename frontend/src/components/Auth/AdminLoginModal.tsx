@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Shield, ShieldAlert, KeyRound, Mail, X, CheckCircle2, Lock, Cpu } from 'lucide-react';
+import { Shield, ShieldAlert, KeyRound, Mail, X, CheckCircle2, Lock, Cpu, Sparkles } from 'lucide-react';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -10,7 +10,7 @@ interface AdminLoginModalProps {
 
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { loginAdmin } = useAuth();
-  const [email, setEmail] = useState('admin@waterpump.io');
+  const [email, setEmail] = useState('karthiknataraj547@gmail.com');
   const [password, setPassword] = useState('Admin@123456');
   const [securityPin, setSecurityPin] = useState('9921');
   const [errorMsg, setErrorMsg] = useState('');
@@ -27,7 +27,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
       if (securityPin !== '9921' && securityPin.length < 4) {
         throw new Error('SECURITY OVERRIDE: Invalid 4-Digit Administrator Security PIN.');
       }
-      await loginAdmin(email, password);
+      await loginAdmin(email.trim(), password);
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: any) {
@@ -37,10 +37,18 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
     }
   };
 
+  const handleFillKarthik = () => {
+    setEmail('karthiknataraj547@gmail.com');
+    setPassword('Admin@123456');
+    setSecurityPin('9921');
+    setErrorMsg('');
+  };
+
   const handleFillDemo = () => {
     setEmail('admin@waterpump.io');
     setPassword('Admin@123456');
     setSecurityPin('9921');
+    setErrorMsg('');
   };
 
   return (
@@ -63,23 +71,23 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
         {/* Cyber Security Clearance Header */}
         <div className="text-center mb-6">
           <div className="w-16 h-16 rounded-2xl neu-inset text-amber-400 flex items-center justify-center mx-auto mb-3 border border-amber-500/30">
-            <Shield className="w-8 h-8 text-amber-400 animate-pulse" />
+            <Shield className="w-8 h-8 text-amber-400" />
           </div>
-          <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-mono font-black uppercase tracking-widest mb-2">
-            <Lock className="w-3 h-3" />
+          <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-mono font-bold uppercase tracking-wider mb-2">
+            <Sparkles className="w-3 h-3 text-amber-300" />
             <span>RESTRICTED ACCESS LEVEL 0</span>
           </div>
           <h3 className="text-2xl font-black tracking-wide text-slate-100 uppercase" style={{ fontFamily: 'var(--font-display)' }}>
             ADMINISTRATOR PORTAL
           </h3>
           <p className="text-xs text-slate-400 font-mono mt-1">
-            Requires privileged credentials & administrative role authorization.
+            Privileged command center for database management, user roles & hardware overrides.
           </p>
         </div>
 
         {errorMsg && (
-          <div className="p-4 mb-5 rounded-2xl neu-inset border border-rose-500/30 text-rose-400 text-xs flex items-start space-x-2.5">
-            <ShieldAlert className="w-5 h-5 shrink-0 text-rose-400" />
+          <div className="p-4 mb-5 rounded-2xl neu-inset border border-rose-500/30 text-rose-400 text-xs flex items-start space-x-2.5 animate-shake">
+            <ShieldAlert className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
             <span className="leading-relaxed font-mono">{errorMsg}</span>
           </div>
         )}
@@ -96,7 +104,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@waterpump.io"
+                placeholder="karthiknataraj547@gmail.com"
                 className="w-full neu-input has-left-icon font-mono text-xs border-amber-500/20 focus:border-amber-400 py-2.5"
               />
             </div>
@@ -124,7 +132,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
               <label className="block text-[11px] font-bold uppercase text-slate-300 font-mono">
                 Hardware 4-Digit Security PIN
               </label>
-              <span className="text-[10px] text-amber-400/80 font-mono">Default: 9921</span>
+              <span className="text-[10px] text-amber-400/80 font-mono font-bold">Default PIN: 9921</span>
             </div>
             <div className="relative flex items-center">
               <Cpu className="absolute left-3.5 w-4 h-4 text-amber-400 pointer-events-none z-10" />
@@ -143,7 +151,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 text-xs font-black tracking-wider flex items-center justify-center space-x-2 rounded-2xl mt-6 cursor-pointer transition-all bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-lg shadow-amber-500/20"
+            className="w-full py-3.5 text-xs font-black tracking-wider flex items-center justify-center space-x-2 rounded-2xl mt-6 cursor-pointer transition-all bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-lg shadow-amber-500/20 active:scale-[0.98]"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             <CheckCircle2 className="w-4 h-4 text-slate-950 font-bold" />
@@ -151,15 +159,25 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
           </button>
         </form>
 
-        <div className="mt-6 pt-4 border-t border-slate-700/20 flex flex-col items-center space-y-2 text-xs">
-          <button
-            type="button"
-            onClick={handleFillDemo}
-            className="text-amber-400 font-mono font-bold hover:underline cursor-pointer"
-          >
-            Fill Default Admin Credentials (admin@waterpump.io)
-          </button>
-          <span className="text-[10px] text-slate-400 font-mono text-center">
+        <div className="mt-6 pt-4 border-t border-slate-700/20 flex flex-col items-center space-y-2.5 text-xs font-mono">
+          <span className="text-[10px] text-slate-500 uppercase">Quick Admin Presets:</span>
+          <div className="grid grid-cols-2 gap-2 w-full">
+            <button
+              type="button"
+              onClick={handleFillKarthik}
+              className="neu-btn p-2 rounded-xl text-[10px] text-amber-400 hover:text-amber-300 text-center cursor-pointer"
+            >
+              Fill Karthik Admin
+            </button>
+            <button
+              type="button"
+              onClick={handleFillDemo}
+              className="neu-btn p-2 rounded-xl text-[10px] text-slate-400 hover:text-slate-200 text-center cursor-pointer"
+            >
+              Fill Default Admin
+            </button>
+          </div>
+          <span className="text-[10px] text-slate-500 font-mono text-center pt-1">
             All administrative actions are logged in immutable system audit records.
           </span>
         </div>

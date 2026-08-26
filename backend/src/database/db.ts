@@ -127,7 +127,19 @@ export class DBManager {
       );
     }
 
-    // 2. Seed Default Standard User / Operator Account if not present
+    // 2. Seed Primary Karthik Nataraj Administrator Account if not present
+    const existingKarthik = await this.queryOne<any>('SELECT * FROM users WHERE email = ?', ['karthiknataraj547@gmail.com']);
+    if (!existingKarthik) {
+      console.log('[DB] Seeding primary administrator (karthiknataraj547@gmail.com)...');
+      const karthikId = 'usr_karthik_admin_001';
+      const karthikPassHash = bcrypt.hashSync('Admin@123456', 10);
+      await this.execute(
+        'INSERT INTO users (id, name, email, phone, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime("now"))',
+        [karthikId, 'Karthik Nataraj', 'karthiknataraj547@gmail.com', '+91-9876543210', karthikPassHash, 'admin', 'active']
+      );
+    }
+
+    // 3. Seed Default Standard User / Operator Account if not present
     const existingUser = await this.queryOne<any>('SELECT * FROM users WHERE email = ?', ['user@waterpump.io']);
     if (!existingUser) {
       console.log('[DB] Seeding default station operator user (user@waterpump.io)...');
