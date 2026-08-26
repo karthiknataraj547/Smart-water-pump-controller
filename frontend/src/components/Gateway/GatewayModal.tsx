@@ -74,12 +74,12 @@ export const GatewayModal: React.FC<GatewayModalProps> = ({ isOpen, onClose }) =
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="neu-card p-8 max-w-lg w-full rounded-3xl relative" style={{ backgroundColor: 'var(--neu-surface)' }}>
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="neu-card p-6 sm:p-8 max-w-lg w-full my-auto max-h-[92vh] overflow-y-auto custom-scrollbar rounded-3xl relative" style={{ backgroundColor: 'var(--neu-surface)' }}>
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-5 right-5 neu-circle-btn w-8 h-8 text-slate-400 hover:text-slate-200"
+          className="absolute top-4 right-4 z-20 neu-circle-btn w-8 h-8 text-slate-400 hover:text-slate-200 cursor-pointer flex items-center justify-center"
         >
           <X className="w-4 h-4" />
         </button>

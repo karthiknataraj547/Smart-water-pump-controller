@@ -174,8 +174,8 @@ export const AutomationPanel: React.FC = () => {
 
       {/* Add Rule Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="neu-card p-6 max-w-md w-full rounded-3xl" style={{ backgroundColor: 'var(--neu-surface)' }}>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="neu-card p-6 max-w-md w-full my-auto max-h-[92vh] overflow-y-auto custom-scrollbar rounded-3xl" style={{ backgroundColor: 'var(--neu-surface)' }}>
             <h3 className="text-lg font-extrabold mb-4" style={{ fontFamily: 'var(--font-display)' }}>
               CREATE AUTOMATION RULE
             </h3>

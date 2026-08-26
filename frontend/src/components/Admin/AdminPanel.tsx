@@ -900,8 +900,8 @@ export const AdminPanel: React.FC = () => {
       {/* MODAL: CREATE NEW USER ACCOUNT */}
       {/* =================================================================== */}
       {showCreateUserModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="neu-card p-6 sm:p-8 max-w-lg w-full rounded-3xl relative" style={{ backgroundColor: 'var(--neu-surface)' }}>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="neu-card p-6 sm:p-8 max-w-lg w-full my-auto max-h-[92vh] overflow-y-auto custom-scrollbar rounded-3xl relative" style={{ backgroundColor: 'var(--neu-surface)' }}>
             <button
               onClick={() => setShowCreateUserModal(false)}
               className="absolute top-5 right-5 neu-circle-btn w-8 h-8 text-slate-400 hover:text-slate-200"
@@ -1012,8 +1012,8 @@ export const AdminPanel: React.FC = () => {
       {/* MODAL: EDIT USER ACCOUNT */}
       {/* =================================================================== */}
       {showEditUserModal && selectedUser && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="neu-card p-6 sm:p-8 max-w-lg w-full rounded-3xl relative" style={{ backgroundColor: 'var(--neu-surface)' }}>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="neu-card p-6 sm:p-8 max-w-lg w-full my-auto max-h-[92vh] overflow-y-auto custom-scrollbar rounded-3xl relative" style={{ backgroundColor: 'var(--neu-surface)' }}>
             <button
               onClick={() => setShowEditUserModal(false)}
               className="absolute top-5 right-5 neu-circle-btn w-8 h-8 text-slate-400 hover:text-slate-200"
@@ -1103,8 +1103,8 @@ export const AdminPanel: React.FC = () => {
       {/* MODAL: CONFIGURE TANK & HARDWARE */}
       {/* =================================================================== */}
       {showEditDeviceModal && selectedDevice && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="neu-card p-6 sm:p-8 max-w-md w-full rounded-3xl relative" style={{ backgroundColor: 'var(--neu-surface)' }}>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="neu-card p-6 sm:p-8 max-w-md w-full my-auto max-h-[92vh] overflow-y-auto custom-scrollbar rounded-3xl relative" style={{ backgroundColor: 'var(--neu-surface)' }}>
             <button
               onClick={() => setShowEditDeviceModal(false)}
               className="absolute top-5 right-5 neu-circle-btn w-8 h-8 text-slate-400 hover:text-slate-200"

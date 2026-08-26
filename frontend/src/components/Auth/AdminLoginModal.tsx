@@ -44,9 +44,9 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
       <div 
-        className="neu-card p-8 max-w-lg w-full rounded-3xl relative border border-amber-500/20" 
+        className="neu-card p-6 sm:p-8 max-w-lg w-full my-auto max-h-[92vh] overflow-y-auto custom-scrollbar rounded-3xl relative border border-amber-500/20" 
         style={{ 
           backgroundColor: 'var(--neu-surface)',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), inset 0 0 20px rgba(245, 158, 11, 0.05)'
@@ -55,7 +55,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-5 right-5 neu-circle-btn w-8 h-8 text-slate-400 hover:text-slate-200"
+          className="absolute top-4 right-4 z-20 neu-circle-btn w-8 h-8 text-slate-400 hover:text-slate-200 cursor-pointer flex items-center justify-center"
         >
           <X className="w-4 h-4" />
         </button>

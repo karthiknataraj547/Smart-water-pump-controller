@@ -41,7 +41,7 @@ export const UserApp: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex transition-colors duration-200" style={{ backgroundColor: 'var(--neu-bg)' }}>
+    <div className="h-screen w-screen overflow-hidden flex transition-colors duration-200" style={{ backgroundColor: 'var(--neu-bg)' }}>
       {/* Navigation Sidebar (Desktop + Mobile Slide-Out Drawer) */}
       <Sidebar
         activeTab={activeTab}
@@ -52,7 +52,7 @@ export const UserApp: React.FC = () => {
       />
 
       {/* Main Content Viewport */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto custom-scrollbar">
         <TopBar
           onOpenAuth={() => setShowAuthModal(true)}
           onOpenAlerts={() => setActiveTab('alerts')}
