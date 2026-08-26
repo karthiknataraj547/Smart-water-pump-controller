@@ -79,6 +79,9 @@ export class MqttBridge {
         this.cloudClient?.subscribe('devices/+/telemetry');
         this.cloudClient?.subscribe('devices/+/ack');
         this.cloudClient?.subscribe('devices/+/status');
+        this.cloudClient?.subscribe('aquacontrol/v1/devices/+/telemetry');
+        this.cloudClient?.subscribe('aquacontrol/v1/devices/+/ack');
+        this.cloudClient?.subscribe('aquacontrol/v1/devices/+/status');
       });
 
       this.cloudClient.on('message', async (topic, payload) => {
@@ -95,24 +98,32 @@ export class MqttBridge {
 
   private async handleIncomingTopicMessage(topic: string, payloadStr: string): Promise<void> {
     try {
+      let deviceUid = '';
+      let subTopic = '';
+
       const parts = topic.split('/');
       if (parts[0] === 'devices' && parts.length >= 3) {
-        const deviceUid = parts[1];
-        const subTopic = parts[2];
-        const data = JSON.parse(payloadStr);
+        deviceUid = parts[1];
+        subTopic = parts[2];
+      } else if (parts[0] === 'aquacontrol' && parts[1] === 'v1' && parts[2] === 'devices' && parts.length >= 5) {
+        deviceUid = parts[3];
+        subTopic = parts[4];
+      }
 
-        if (subTopic === 'telemetry') {
-          if (this.onTelemetryCallback) {
-            await this.onTelemetryCallback(deviceUid, data);
-          }
-        } else if (subTopic === 'ack') {
-          if (this.onAckCallback) {
-            await this.onAckCallback(deviceUid, data);
-          }
-        } else if (subTopic === 'status') {
-          if (this.onStatusCallback) {
-            await this.onStatusCallback(deviceUid, data.status || 'offline');
-          }
+      if (!deviceUid || !subTopic) return;
+      const data = JSON.parse(payloadStr);
+
+      if (subTopic === 'telemetry') {
+        if (this.onTelemetryCallback) {
+          await this.onTelemetryCallback(deviceUid, data);
+        }
+      } else if (subTopic === 'ack') {
+        if (this.onAckCallback) {
+          await this.onAckCallback(deviceUid, data);
+        }
+      } else if (subTopic === 'status') {
+        if (this.onStatusCallback) {
+          await this.onStatusCallback(deviceUid, data.status || 'offline');
         }
       }
     } catch (err: any) {
@@ -131,7 +142,8 @@ export class MqttBridge {
   }
 
   public publishCommand(deviceUid: string, command: any): void {
-    const topic = `devices/${deviceUid}/commands`;
+    const topic1 = `devices/${deviceUid}/commands`;
+    const topic2 = `aquacontrol/v1/devices/${deviceUid}/commands`;
     const payloadBuffer = Buffer.from(JSON.stringify(command));
 
     // 1. Publish to local Aedes Broker
@@ -139,21 +151,18 @@ export class MqttBridge {
       this.aedesInstance.publish({
         cmd: 'publish',
         qos: 1,
-        topic,
+        topic: topic1,
         payload: payloadBuffer,
         retain: false,
         dup: false
-      }, (err: any) => {
-        if (err) console.error(`[MQTT] Local publish error to ${topic}:`, err);
-      });
+      }, () => {});
     }
 
     // 2. Publish to Cloud Broker
     if (this.cloudClient && this.cloudClient.connected) {
-      this.cloudClient.publish(topic, JSON.stringify(command), { qos: 1 }, (err) => {
-        if (err) console.error(`[MQTT] Cloud bridge publish error to ${topic}:`, err);
-        else console.log(`[MQTT] Cloud published command to ${topic}:`, command);
-      });
+      this.cloudClient.publish(topic1, JSON.stringify(command), { qos: 0 });
+      this.cloudClient.publish(topic2, JSON.stringify(command), { qos: 0 });
+      console.log(`[MQTT] Cloud published command to ${topic1} & ${topic2}:`, command);
     }
   }
 }

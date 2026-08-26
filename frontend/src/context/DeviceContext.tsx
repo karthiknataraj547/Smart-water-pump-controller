@@ -175,20 +175,36 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       mqttClientRef.current = client;
 
       client.on('connect', () => {
-        console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)!');
+        console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to topics...');
         setMqttConnected(true);
         client.subscribe('devices/+/telemetry');
         client.subscribe('devices/+/ack');
         client.subscribe('devices/+/status');
+        client.subscribe('devices/+/alerts');
+        client.subscribe('aquacontrol/v1/devices/+/telemetry');
+        client.subscribe('aquacontrol/v1/devices/+/ack');
+        client.subscribe('aquacontrol/v1/devices/+/status');
+        client.subscribe('aquacontrol/v1/devices/+/alerts');
       });
 
       client.on('message', (topic: string, message: Buffer) => {
         try {
           const payloadStr = message.toString();
           const data = JSON.parse(payloadStr);
+          
+          let deviceUid = 'WPC-A81F29';
+          let subTopic = '';
+
           const parts = topic.split('/');
-          const deviceUid = parts[1] || 'WPC-A81F29';
-          const subTopic = parts[2] || '';
+          if (parts[0] === 'devices' && parts.length >= 3) {
+            deviceUid = parts[1];
+            subTopic = parts[2];
+          } else if (parts[0] === 'aquacontrol' && parts[1] === 'v1' && parts[2] === 'devices' && parts.length >= 5) {
+            deviceUid = parts[3];
+            subTopic = parts[4];
+          }
+
+          if (!subTopic) return;
 
           if (subTopic === 'telemetry') {
             const now = Date.now();
@@ -209,23 +225,25 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               created_at: new Date(now).toISOString()
             });
 
-            if (typeof data.pump_running === 'boolean') {
+            if (typeof data.pump_running === 'boolean' || data.pump_state) {
+              const isRunning = data.pump_running === true || data.pump_state === 'ON';
               setPumpStatus(prev => ({
                 ...(prev || {
                   id: 'ps_live',
                   device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                  mode: 'AUTOMATIC',
+                  mode: data.pump_mode || 'AUTOMATIC',
                   runtime_seconds: 0,
                   changed_at: new Date().toISOString(),
                   changed_by: 'HARDWARE_TELEMETRY'
                 }),
-                pump_state: data.pump_running ? 'ON' : 'OFF',
-                current_draw_amps: Number(data.current_amps ?? (data.pump_running ? 4.8 : 0.0)),
+                pump_state: isRunning ? 'ON' : 'OFF',
+                mode: (data.pump_mode || prev?.mode || 'AUTOMATIC') as any,
+                current_draw_amps: Number(data.current_amps ?? (isRunning ? 4.8 : 0.0)),
                 runtime_seconds: Number(data.runtime_seconds ?? prev?.runtime_seconds ?? 0)
               }));
             }
           } else if (subTopic === 'ack') {
-            const confirmedState = data.confirmed_state || (data.status === 'successful' ? 'ON' : 'OFF');
+            const confirmedState = data.confirmed_state || data.pump_state || (data.status === 'SUCCESS' || data.status === 'successful' ? 'ON' : 'OFF');
             setPumpStatus(prev => ({
               ...(prev || {
                 id: 'ps_live',
@@ -246,6 +264,19 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const st = data.status === 'online' ? 'online' : 'offline';
             setSelectedDevice(prev => prev ? { ...prev, status: st } : prev);
             setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: st } : d));
+          } else if (subTopic === 'alerts') {
+            if (data.alert_type || data.title || data.message) {
+              const sev = (data.severity || 'warning').toLowerCase() as 'info' | 'warning' | 'critical';
+              setAlerts(prev => [{
+                id: `alt_${Date.now()}`,
+                device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                title: data.title || data.alert_type || 'Hardware Alert',
+                severity: (sev === 'critical' || sev === 'info') ? sev : 'warning',
+                message: data.message || 'Hardware alert condition triggered',
+                acknowledged: false,
+                created_at: new Date().toISOString()
+              }, ...prev]);
+            }
           }
         } catch (e) {}
       });
@@ -388,18 +419,24 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Helper to publish direct MQTT command
   const publishDirectMqttCommand = (cmdType: string, actionStr: string, payload: any = {}) => {
+    const devUid = selectedDevice?.device_uid || 'WPC-A81F29';
+    const cmdId = `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const cmdPayload = JSON.stringify({
+      cmd_id: cmdId,
+      command_id: cmdId,
+      command: actionStr,
+      command_type: cmdType,
+      action: actionStr,
+      mode: payload.mode,
+      payload,
+      source: 'WEB_DASHBOARD',
+      timestamp: Math.floor(Date.now() / 1000)
+    });
+
     if (mqttClientRef.current && mqttClientRef.current.connected) {
-      const topic = `devices/${selectedDevice?.device_uid || 'WPC-A81F29'}/commands`;
-      const cmdPayload = JSON.stringify({
-        command_id: `cmd_${Date.now()}`,
-        command_type: cmdType,
-        action: actionStr,
-        payload,
-        source: 'web_mqtt_direct',
-        timestamp: Date.now()
-      });
-      mqttClientRef.current.publish(topic, cmdPayload, { qos: 1 });
-      console.log(`[MQTT Direct] Published ${cmdType} to topic '${topic}'`);
+      mqttClientRef.current.publish(`devices/${devUid}/commands`, cmdPayload, { qos: 0 });
+      mqttClientRef.current.publish(`aquacontrol/v1/devices/${devUid}/commands`, cmdPayload, { qos: 0 });
+      console.log(`[MQTT Direct] Published command to 'devices/${devUid}/commands':`, cmdPayload);
     }
   };
 

@@ -164,11 +164,11 @@ void saveCredentials(const String& ssid, const String& pass, const String& broke
 void handleApplyCredentials(const String& jsonString);
 void startBleProvisioning();
 void setupHttpEndpoints();
-void setPumpState(bool state, const char* initiator);
-void triggerEmergencyStop(const char* reason);
-void sendHttpStateAck(const char* state, const char* initiator);
+void setPumpState(bool state, const char* initiator, const char* cmdId = "");
+void triggerEmergencyStop(const char* reason, const char* cmdId = "");
+void sendHttpStateAck(const char* state, const char* initiator, const char* cmdId = "");
 void sendHttpTelemetry();
-void publishHardwareAck(const char* state, const char* initiator);
+void publishHardwareAck(const char* state, const char* initiator, const char* cmdId = "");
 void onMqttMessage(char* topic, byte* payload, unsigned int length);
 uint16_t calculateCrc16(const uint8_t *data, size_t length);
 
@@ -654,13 +654,13 @@ uint16_t calculateCrc16(const uint8_t *data, size_t length) {
 // =====================================================================
 // 6. RELAY & PUMP DRIVER
 // =====================================================================
-void setPumpState(bool state, const char* initiator) {
+void setPumpState(bool state, const char* initiator, const char* cmdId) {
     // High-Level Cutoff Lock: Block START in AUTOMATIC mode if tank is full
     if (state && pumpMode == "AUTOMATIC" && latestTankData.water_level_pct >= AUTO_STOP_LEVEL_PCT) {
         Serial.printf("[PUMP] Rejected START in AUTOMATIC mode: Tank level %.1f%% >= %.1f%% cutoff\n",
             latestTankData.water_level_pct, AUTO_STOP_LEVEL_PCT);
-        publishHardwareAck("OFF", "AUTO_HIGH_CUTOFF_LOCKED");
-        sendHttpStateAck("OFF", "AUTO_HIGH_CUTOFF_LOCKED");
+        publishHardwareAck("OFF", "AUTO_HIGH_CUTOFF_LOCKED", cmdId);
+        sendHttpStateAck("OFF", "AUTO_HIGH_CUTOFF_LOCKED", cmdId);
         return;
     }
 
@@ -682,11 +682,11 @@ void setPumpState(bool state, const char* initiator) {
         Serial.printf("[PUMP] DE-ENERGIZED by %s\n", initiator);
     }
 
-    publishHardwareAck(state ? "ON" : "OFF", initiator);
-    sendHttpStateAck(state ? "ON" : "OFF", initiator);
+    publishHardwareAck(state ? "ON" : "OFF", initiator, cmdId);
+    sendHttpStateAck(state ? "ON" : "OFF", initiator, cmdId);
 }
 
-void triggerEmergencyStop(const char* reason) {
+void triggerEmergencyStop(const char* reason, const char* cmdId) {
     systemFault = true;
     faultReason = reason;
     pumpState = false;
@@ -700,31 +700,36 @@ void triggerEmergencyStop(const char* reason) {
     }
 
     Serial.printf("[EMERGENCY STOP] Tripped! Reason: %s\n", reason);
-    publishHardwareAck("EMERGENCY_STOP", reason);
-    sendHttpStateAck("EMERGENCY_STOP", reason);
+    publishHardwareAck("EMERGENCY_STOP", reason, cmdId);
+    sendHttpStateAck("EMERGENCY_STOP", reason, cmdId);
 }
 
 // =====================================================================
 // 7. CLOUD MQTT & HTTP TELEMETRY DISPATCH
 // =====================================================================
-void publishHardwareAck(const char* state, const char* initiator) {
+void publishHardwareAck(const char* state, const char* initiator, const char* cmdId) {
     if (!mqttClient.connected()) return;
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<384> doc;
     doc["device_uid"] = DEVICE_UID;
-    doc["status"] = systemFault ? "failed" : "successful";
+    if (cmdId && strlen(cmdId) > 0) doc["cmd_id"] = cmdId;
+    doc["status"] = systemFault ? "FAILED" : "SUCCESS";
     doc["confirmed_state"] = state;
+    doc["pump_state"] = pumpState ? "ON" : "OFF";
     doc["current_amps"] = currentAmps;
     doc["runtime_seconds"] = totalRuntimeSeconds;
     doc["changed_by"] = initiator;
+    doc["timestamp"] = millis() / 1000;
 
-    char buffer[256];
+    char buffer[384];
     serializeJson(doc, buffer);
-    String topic = String("devices/") + DEVICE_UID + "/ack";
-    mqttClient.publish(topic.c_str(), buffer, true);
-    Serial.printf("[MQTT ACK] Published confirmation on '%s': %s\n", topic.c_str(), buffer);
+    String topic1 = String("devices/") + DEVICE_UID + "/ack";
+    String topic2 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/ack";
+    mqttClient.publish(topic1.c_str(), buffer, true);
+    mqttClient.publish(topic2.c_str(), buffer, true);
+    Serial.printf("[MQTT ACK] Published confirmation: %s\n", buffer);
 }
 
-void sendHttpStateAck(const char* state, const char* initiator) {
+void sendHttpStateAck(const char* state, const char* initiator, const char* cmdId) {
     if (WiFi.status() != WL_CONNECTED || apiServerHost.length() == 0) return;
 
     HTTPClient http;
@@ -732,10 +737,12 @@ void sendHttpStateAck(const char* state, const char* initiator) {
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
 
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<384> doc;
     doc["device_uid"] = DEVICE_UID;
+    if (cmdId && strlen(cmdId) > 0) doc["cmd_id"] = cmdId;
     doc["status"] = systemFault ? "failed" : "successful";
     doc["confirmed_state"] = state;
+    doc["pump_state"] = pumpState ? "ON" : "OFF";
     doc["current_amps"] = currentAmps;
     doc["runtime_seconds"] = totalRuntimeSeconds;
     doc["changed_by"] = initiator;
@@ -879,28 +886,52 @@ void TaskSafetyLoop(void *parameter) {
 // 10. FREERTOS NETWORKING & MQTT LOOP (Core 0)
 // =====================================================================
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+    // Visual telemetry activity flash on GPIO 2 LED
+    digitalWrite(PIN_LED_WIFI, LOW);
+    delay(30);
+    digitalWrite(PIN_LED_WIFI, HIGH);
+
     StaticJsonDocument<512> doc;
     DeserializationError error = deserializeJson(doc, payload, length);
-    if (error) {
-        Serial.printf("[MQTT] JSON parse error: %s\n", error.c_str());
-        return;
+    
+    String action = "";
+    String cmdId = "";
+    String initiator = "MQTT_CLOUD";
+
+    if (!error) {
+        action = String(doc["command"] | doc["action"] | doc["command_type"] | doc["state"] | "");
+        cmdId = String(doc["cmd_id"] | doc["command_id"] | "");
+        initiator = String(doc["source"] | doc["initiator"] | "MQTT_COMMAND");
+    } else {
+        // Fallback: parse raw string payload
+        char rawStr[64];
+        size_t copyLen = length < 63 ? length : 63;
+        memcpy(rawStr, payload, copyLen);
+        rawStr[copyLen] = '\0';
+        action = String(rawStr);
+        action.trim();
     }
 
-    const char* action = doc["action"] | doc["command_type"] | "";
-    Serial.printf("[MQTT] Inbound Command on '%s': '%s'\n", topic, action);
+    Serial.printf("[MQTT] Inbound Command on '%s': '%s' (cmd_id: '%s')\n", topic, action.c_str(), cmdId.c_str());
 
-    if (strcmp(action, "START") == 0 || strcmp(action, "START_PUMP") == 0) {
-        setPumpState(true, "CLOUD_MQTT_COMMAND");
-    } else if (strcmp(action, "STOP") == 0 || strcmp(action, "STOP_PUMP") == 0) {
-        setPumpState(false, "CLOUD_MQTT_COMMAND");
-    } else if (strcmp(action, "SET_MODE") == 0) {
-        pumpMode = doc["mode"] | doc["payload"]["mode"] | "AUTOMATIC";
-        Serial.printf("[MQTT] Pump Mode set to: %s\n", pumpMode.c_str());
-    } else if (strcmp(action, "EMERGENCY_STOP") == 0) {
-        triggerEmergencyStop("Remote Cloud E-Stop Command");
-    } else if (strcmp(action, "CLEAR_FAULT") == 0) {
+    if (action.equalsIgnoreCase("START") || action.equalsIgnoreCase("START_PUMP") || action.equalsIgnoreCase("ON")) {
         systemFault = false;
         digitalWrite(PIN_LED_FAULT, LOW);
+        setPumpState(true, initiator.c_str(), cmdId.c_str());
+    } else if (action.equalsIgnoreCase("STOP") || action.equalsIgnoreCase("STOP_PUMP") || action.equalsIgnoreCase("OFF")) {
+        setPumpState(false, initiator.c_str(), cmdId.c_str());
+    } else if (action.equalsIgnoreCase("SET_MODE")) {
+        pumpMode = doc["mode"] | doc["payload"]["mode"] | "AUTOMATIC";
+        Serial.printf("[MQTT] Pump Mode set to: %s\n", pumpMode.c_str());
+        publishHardwareAck(pumpState ? "ON" : "OFF", initiator.c_str(), cmdId.c_str());
+    } else if (action.equalsIgnoreCase("EMERGENCY_STOP") || action.equalsIgnoreCase("ESTOP")) {
+        triggerEmergencyStop("Remote Cloud E-Stop Command", cmdId.c_str());
+    } else if (action.equalsIgnoreCase("CLEAR_FAULT") || action.equalsIgnoreCase("RESET_FAULT")) {
+        systemFault = false;
+        digitalWrite(PIN_LED_FAULT, LOW);
+        publishHardwareAck("OFF", "FAULT_CLEARED", cmdId.c_str());
+    } else if (action.equalsIgnoreCase("PING")) {
+        publishHardwareAck(pumpState ? "ON" : "OFF", "PONG", cmdId.c_str());
     }
 }
 
@@ -946,30 +977,34 @@ void TaskNetworkLoop(void *parameter) {
                     mqttClient.setKeepAlive(30);
 
                     String clientId = String("ESP32_") + DEVICE_UID + "_" + String(random(1000, 9999));
-                    String lwtTopic = String("devices/") + DEVICE_UID + "/status";
+                    String lwtTopic1 = String("devices/") + DEVICE_UID + "/status";
+                    String lwtTopic2 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/status";
                     String lwtPayload = "{\"status\":\"offline\",\"device_uid\":\"" + String(DEVICE_UID) + "\"}";
 
                     Serial.printf("[MQTT] Connecting to '%s:%d' (Client: %s)...\n",
                         mqttBroker.c_str(), mqttPort, clientId.c_str());
 
                     // Try standard open connection first (ideal for broker.emqx.io)
-                    bool conn = mqttClient.connect(clientId.c_str(), lwtTopic.c_str(), 0, true, lwtPayload.c_str());
+                    bool conn = mqttClient.connect(clientId.c_str(), lwtTopic1.c_str(), 0, true, lwtPayload.c_str());
                     if (!conn && authCode.length() > 0) {
-                        conn = mqttClient.connect(clientId.c_str(), DEVICE_UID, authCode.c_str(), lwtTopic.c_str(), 0, true, lwtPayload.c_str());
+                        conn = mqttClient.connect(clientId.c_str(), DEVICE_UID, authCode.c_str(), lwtTopic1.c_str(), 0, true, lwtPayload.c_str());
                     }
 
                     if (conn) {
                         mqttConnected = true;
                         Serial.println("[MQTT] ✓ Connected to Cloud MQTT Broker!");
 
-                        // Publish instant online message
-                        String onlinePayload = "{\"status\":\"online\",\"device_uid\":\"" + String(DEVICE_UID) + "\",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
-                        mqttClient.publish(lwtTopic.c_str(), onlinePayload.c_str(), true);
+                        // Publish instant online message on both topics
+                        String onlinePayload = "{\"status\":\"online\",\"device_uid\":\"" + String(DEVICE_UID) + "\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"rssi\":" + String(WiFi.RSSI()) + "}";
+                        mqttClient.publish(lwtTopic1.c_str(), onlinePayload.c_str(), true);
+                        mqttClient.publish(lwtTopic2.c_str(), onlinePayload.c_str(), true);
 
-                        // Subscribe to pump commands
-                        String cmdTopic = String("devices/") + DEVICE_UID + "/commands";
-                        mqttClient.subscribe(cmdTopic.c_str(), 0);
-                        Serial.printf("[MQTT] Subscribed to command topic: '%s'\n", cmdTopic.c_str());
+                        // Subscribe to pump commands on both namespaces
+                        String cmdTopic1 = String("devices/") + DEVICE_UID + "/commands";
+                        String cmdTopic2 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/commands";
+                        mqttClient.subscribe(cmdTopic1.c_str(), 0);
+                        mqttClient.subscribe(cmdTopic2.c_str(), 0);
+                        Serial.printf("[MQTT] Subscribed to: '%s' and '%s'\n", cmdTopic1.c_str(), cmdTopic2.c_str());
                     } else {
                         mqttConnected = false;
                         Serial.printf("[MQTT] Connection attempt failed (rc=%d). Retrying in 3s...\n", mqttClient.state());
@@ -994,6 +1029,7 @@ void TaskNetworkLoop(void *parameter) {
 
                     StaticJsonDocument<512> doc;
                     doc["device_uid"] = DEVICE_UID;
+                    doc["timestamp"] = millis() / 1000;
                     doc["water_level_percentage"] = latestTankData.water_level_pct;
                     doc["water_level_pct"] = latestTankData.water_level_pct;
                     doc["water_level_liters"] = latestTankData.water_liters;
@@ -1003,14 +1039,21 @@ void TaskNetworkLoop(void *parameter) {
                     doc["tds_ppm"] = latestTankData.tds_ppm;
                     doc["temperature_c"] = latestTankData.temperature_c;
                     doc["pump_running"] = pumpState;
+                    doc["pump_state"] = pumpState ? "ON" : "OFF";
+                    doc["pump_mode"] = pumpMode;
                     doc["current_amps"] = currentAmps;
+                    doc["runtime_seconds"] = totalRuntimeSeconds;
                     doc["subnode_online"] = subNodeConnected;
                     doc["rssi"] = WiFi.RSSI();
+                    doc["free_heap"] = ESP.getFreeHeap();
+                    doc["uptime_seconds"] = millis() / 1000;
 
                     char buffer[512];
                     serializeJson(doc, buffer);
-                    String topic = String("devices/") + DEVICE_UID + "/telemetry";
-                    mqttClient.publish(topic.c_str(), buffer);
+                    String topic1 = String("devices/") + DEVICE_UID + "/telemetry";
+                    String topic2 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/telemetry";
+                    mqttClient.publish(topic1.c_str(), buffer);
+                    mqttClient.publish(topic2.c_str(), buffer);
                 }
             }
 
