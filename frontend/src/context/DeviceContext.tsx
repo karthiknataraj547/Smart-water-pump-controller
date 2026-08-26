@@ -80,13 +80,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => clearInterval(timer);
   }, []);
 
-  // Resilient Physical Device Online State Check:
-  // Hardware is online if fresh telemetry arrived via MQTT/WS/REST within the last 45s,
-  // or reported online by the device model.
+  // STRICT REAL-TIME MQTT HARDWARE STATUS (Zero Mocking):
+  // The device is considered online ONLY if genuine MQTT packets are arriving
+  // from the physical ESP32 on topic 'devices/WPC-A81F29/telemetry' or 'status'
+  // within the last 4.5 seconds (ESP32 publishes at 1Hz).
   const isDeviceOnline = Boolean(
-    (lastTelemetryTimestamp > 0 && nowTick - lastTelemetryTimestamp < 45000) ||
-    selectedDevice?.status === 'online' ||
-    wsConnected
+    lastTelemetryTimestamp > 0 && (nowTick - lastTelemetryTimestamp < 4500)
   );
 
   // Load devices on auth change
@@ -116,19 +115,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Load device-specific data when selected device changes
   const loadDeviceData = useCallback(async (deviceId: string) => {
     try {
-      const [pStatus, tReading, aList, rList] = await Promise.allSettled([
+      const [pStatus, aList, rList] = await Promise.allSettled([
         ApiService.getPumpStatus(deviceId),
-        ApiService.getLatestSensorReading(deviceId),
         ApiService.getAlerts(deviceId),
         ApiService.getAutomationRules(deviceId)
       ]);
 
       if (pStatus.status === 'fulfilled' && pStatus.value) {
         setPumpStatus(pStatus.value);
-      }
-      if (tReading.status === 'fulfilled' && tReading.value) {
-        setTelemetry(tReading.value);
-        setLastTelemetryTimestamp(Date.now());
       }
       if (aList.status === 'fulfilled' && aList.value) setAlerts(aList.value);
       if (rList.status === 'fulfilled' && rList.value) setRules(rList.value);
@@ -261,7 +255,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setCommandStatusText(`Hardware Confirmed: ${confirmedState}`);
             setTimeout(() => setCommandStatusText(''), 2500);
           } else if (subTopic === 'status') {
-            const st = data.status === 'online' ? 'online' : 'offline';
+            const isOnline = data.status === 'online';
+            if (isOnline) {
+              setLastTelemetryTimestamp(Date.now());
+            } else {
+              setLastTelemetryTimestamp(0);
+            }
+            const st = isOnline ? 'online' : 'offline';
             setSelectedDevice(prev => prev ? { ...prev, status: st } : prev);
             setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: st } : d));
           } else if (subTopic === 'alerts') {

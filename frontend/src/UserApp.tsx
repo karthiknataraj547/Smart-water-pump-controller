@@ -72,12 +72,12 @@ export const UserApp: React.FC = () => {
                     PHYSICAL HARDWARE CONTROLLER OFFLINE
                   </h3>
                   <p className="text-[11px] text-slate-400 font-mono">
-                    Node <span className="text-white font-bold">{selectedDevice?.device_uid || 'WPC-A81F29'}</span> is disconnected or powered off. Tank sensors & motor telemetry are set to 0.
+                    Awaiting live MQTT packets from <span className="text-white font-bold">{selectedDevice?.device_uid || 'WPC-A81F29'}</span> on <span className="text-cyan-400">broker.emqx.io</span> (Topic: <span className="text-emerald-400 font-mono">devices/{selectedDevice?.device_uid || 'WPC-A81F29'}/telemetry</span>).
                   </p>
                 </div>
               </div>
               <div className="hidden sm:flex items-center space-x-2 text-[10px] font-mono text-rose-300 font-bold neu-inset px-3 py-1.5 rounded-xl">
-                <span>RECONNECTING...</span>
+                <span>LISTENING ON MQTT</span>
               </div>
             </div>
           )}

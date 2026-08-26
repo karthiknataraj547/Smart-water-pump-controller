@@ -119,15 +119,17 @@ export const SensorGrid: React.FC = () => {
               TANK SUB-NODE
             </span>
           </div>
-          <span className="w-2 h-2 rounded-full neu-dot neu-dot-emerald" />
+          <span className={`w-2 h-2 rounded-full neu-dot ${isDeviceOnline ? 'neu-dot-emerald' : 'neu-dot-rose'}`} />
         </div>
 
         <div className="neu-screen p-4 my-3.5 flex flex-col items-center justify-center rounded-2xl">
           <div className="flex items-baseline space-x-1">
-            <span className="text-3xl font-black text-cyan-400 tracking-wider">{rssi}</span>
-            <span className="text-xs font-mono font-bold text-cyan-400/80">dBm</span>
+            <span className="text-3xl font-black text-cyan-400 tracking-wider">{isDeviceOnline ? rssi : '---'}</span>
+            <span className="text-xs font-mono font-bold text-cyan-400/80">{isDeviceOnline ? 'dBm' : ''}</span>
           </div>
-          <span className="text-[10px] text-emerald-400 font-mono mt-0.5">ESP-NOW DIRECT (2.0s)</span>
+          <span className={`text-[10px] font-mono mt-0.5 ${isDeviceOnline ? 'text-emerald-400' : 'text-slate-400'}`}>
+            {isDeviceOnline ? 'ESP-NOW DIRECT (1.0s)' : 'HARDWARE OFFLINE'}
+          </span>
         </div>
 
         <div className="flex items-center justify-between text-xs text-slate-400">
