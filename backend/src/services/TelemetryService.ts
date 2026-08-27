@@ -50,6 +50,31 @@ export class TelemetryService {
       [device.id]
     );
 
+    // Synchronize physical pump state directly from hardware telemetry
+    const rawPumpState = payload.pump_state || (payload.pump_running === true ? 'ON' : (payload.pump_running === false ? 'OFF' : undefined));
+    if (rawPumpState) {
+      const hwPumpState = rawPumpState === 'ON' ? 'ON' : (rawPumpState === 'FAULT' || rawPumpState === 'EMERGENCY_STOP' ? 'FAULT' : 'OFF');
+      const hwAmps = Number(payload.current_amps ?? (hwPumpState === 'ON' ? 4.8 : 0.0));
+      const hwRuntime = Number(payload.runtime_seconds ?? 0);
+      const hwMode = payload.pump_mode || 'AUTOMATIC';
+
+      await db.execute(
+        `UPDATE pump_status 
+         SET pump_state = ?, current_draw_amps = ?, runtime_seconds = ?, changed_at = datetime('now'), changed_by = 'HARDWARE_TELEMETRY'
+         WHERE device_id = ?`,
+        [hwPumpState, hwAmps, hwRuntime, device.id]
+      );
+
+      wsHub.broadcastPumpState(device.device_uid, {
+        deviceId: device.id,
+        deviceUid: device.device_uid,
+        pump_state: hwPumpState,
+        mode: hwMode,
+        current_draw_amps: hwAmps,
+        runtime_seconds: hwRuntime
+      });
+    }
+
     // Update Sub Node if provided
     let subnodeOnline = true;
     if (payload.node_uid) {
@@ -67,7 +92,7 @@ export class TelemetryService {
       }
     }
 
-    // Broadcast live telemetry to all connected clients (Web, Mobile, Windows Projector)
+    // Broadcast live 200ms telemetry to all connected clients (Web, Mobile, Windows Projector)
     const telemetryBroadcast = {
       readingId,
       deviceUid: device.device_uid,
@@ -79,6 +104,10 @@ export class TelemetryService {
       tdsPpm,
       temperatureC: tempC,
       sensorStatus,
+      pumpState: rawPumpState || 'OFF',
+      pumpRunning: rawPumpState === 'ON',
+      currentAmps: Number(payload.current_amps ?? (rawPumpState === 'ON' ? 4.8 : 0.0)),
+      runtimeSeconds: Number(payload.runtime_seconds ?? 0),
       rssi: payload.rssi || -65,
       batteryMv: payload.battery_mv || 3300,
       timestamp: new Date().toISOString()

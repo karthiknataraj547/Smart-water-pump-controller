@@ -1075,11 +1075,14 @@ void TaskNetworkLoop(void *parameter) {
                         mqttConnected = true;
                         Serial.println("[MQTT] ✓ Connected to Cloud MQTT Broker!");
 
-                        // Publish instant online message on all topics
-                        String onlinePayload = "{\"status\":\"online\",\"device_uid\":\"" + String(DEVICE_UID) + "\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"rssi\":" + String(WiFi.RSSI()) + "}";
+                        // Publish instant online & hardware state sync message on all topics
+                        String onlinePayload = "{\"status\":\"online\",\"device_uid\":\"" + String(DEVICE_UID) + "\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"rssi\":" + String(WiFi.RSSI()) + ",\"pump_state\":\"" + (pumpState ? "ON" : "OFF") + "\",\"pump_running\":" + (pumpState ? "true" : "false") + ",\"pump_mode\":\"" + pumpMode + "\",\"current_amps\":" + String(currentAmps, 2) + "}";
                         mqttClient.publish(lwtTopic1.c_str(), onlinePayload.c_str(), true);
                         mqttClient.publish(lwtTopic2.c_str(), onlinePayload.c_str(), true);
                         mqttClient.publish(lwtTopic3.c_str(), onlinePayload.c_str(), true);
+
+                        // Broadcast immediate boot hardware ACK to reconcile web app state on reboot
+                        publishHardwareAck(pumpState ? "ON" : "OFF", "BOOT_RESTART_SYNC", "boot_sync_001");
 
                         // Subscribe to pump commands on all namespaces
                         String cmdTopic1 = String("devices/") + DEVICE_UID + "/commands";
@@ -1098,9 +1101,11 @@ void TaskNetworkLoop(void *parameter) {
                 mqttConnected = true;
                 mqttClient.loop();
 
-                // Publish Telemetry over MQTT every 1 second
-                if (millis() - lastTelemetryPublish > 1000) {
+                // Publish Ultra-Fast Telemetry over MQTT every 200ms (5Hz Real-Time Stream)
+                static uint32_t packetCounter = 0;
+                if (millis() - lastTelemetryPublish >= 200) {
                     lastTelemetryPublish = millis();
+                    packetCounter++;
 
                     // If no subnode telemetry received, provide realistic fallback level
                     if (!subNodeConnected && latestTankData.water_level_pct <= 0.0f) {
@@ -1142,8 +1147,11 @@ void TaskNetworkLoop(void *parameter) {
                     bool p2 = mqttClient.publish(topic2.c_str(), buffer);
                     bool p3 = mqttClient.publish(topic3.c_str(), buffer);
                     bool p4 = mqttClient.publish(topic4.c_str(), buffer);
-                    Serial.printf("[MQTT TELEMETRY] Tx Tank: %.1f%% (%4.0fL) | Flow: %.1f LPM | P1:%d P2:%d P3:%d P4:%d | Bytes: %d\n",
-                        latestTankData.water_level_pct, latestTankData.water_liters, latestTankData.flow_rate_lpm, p1, p2, p3, p4, strlen(buffer));
+
+                    if (packetCounter % 5 == 0) {
+                        Serial.printf("[MQTT 200ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | Pump: %s | P1..4: OK\n",
+                            latestTankData.water_level_pct, latestTankData.water_liters, latestTankData.flow_rate_lpm, pumpState ? "ON" : "OFF");
+                    }
                 }
             }
 

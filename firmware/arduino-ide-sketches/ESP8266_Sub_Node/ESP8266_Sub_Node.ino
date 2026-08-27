@@ -111,37 +111,33 @@ float readRawUltrasonicDistance() {
 }
 
 float getMedianDistance() {
-    float samples[5];
+    float samples[3];
     int validCount = 0;
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 3; i++) {
         float d = readRawUltrasonicDistance();
         if (d > 2.0 && d < 400.0) {
             samples[validCount++] = d;
         }
-        delay(10);
+        delayMicroseconds(800);
     }
 
     if (validCount == 0) return -1.0;
+    if (validCount == 1) return samples[0];
 
-    // Sort valid samples
-    for (int i = 0; i < validCount - 1; i++) {
-        for (int j = 0; j < validCount - i - 1; j++) {
-            if (samples[j] > samples[j + 1]) {
-                float tmp = samples[j];
-                samples[j] = samples[j + 1];
-                samples[j + 1] = tmp;
-            }
-        }
-    }
-    return samples[validCount / 2];
+    // Simple 3-element sort
+    if (validCount == 2) return (samples[0] + samples[1]) / 2.0f;
+    if (samples[0] > samples[1]) { float tmp = samples[0]; samples[0] = samples[1]; samples[1] = tmp; }
+    if (samples[1] > samples[2]) { float tmp = samples[1]; samples[1] = samples[2]; samples[2] = tmp; }
+    if (samples[0] > samples[1]) { float tmp = samples[0]; samples[0] = samples[1]; samples[1] = tmp; }
+    return samples[1];
 }
 
 // --- Flow Rate & Volume Calculation ---
 void updateFlowMetrics() {
     uint32_t now = millis();
     uint32_t dt = now - lastFlowCalcTime;
-    if (dt >= 1000) {
+    if (dt >= 200) {
         noInterrupts();
         uint32_t pulses = flowPulseCount;
         flowPulseCount = 0;
@@ -178,17 +174,16 @@ float readTdsPpm(float waterTempC = 25.0) {
 void onDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
     if (sendStatus == 0) {
         // Delivery Success
-    } else {
-        // Serial.println("[ESP-NOW] Warning: Delivery failed (ESP32 might be on different channel)");
     }
 }
 
 // --- Arduino Setup ---
 void setup() {
     Serial.begin(115200);
-    delay(500);
+    delay(300);
     Serial.println("\n==================================================");
-    Serial.println("  AQUACONTROL — ESP8266 TANK SUB NODE v2.1.0");
+    Serial.println("  AQUACONTROL — ESP8266 TANK SUB NODE v2.2.0");
+    Serial.println("  Ultra-Fast 200ms High-Speed Real-Time Sync");
     Serial.println("==================================================");
 
     pinMode(PIN_TRIG, OUTPUT);
@@ -223,17 +218,17 @@ void setup() {
     // Register Broadcast Peer on the matching RF Channel
     esp_now_add_peer(esp32BroadcastMac, ESP_NOW_ROLE_SLAVE, currentWifiChannel, NULL, 0);
 
-    Serial.printf("[ESP-NOW] Sub Node Ready! Broadcasting packets to ESP32 on Channel %d...\n", currentWifiChannel);
+    Serial.printf("[ESP-NOW] Sub Node Ready! Broadcasting 200ms telemetry to ESP32 on Channel %d...\n", currentWifiChannel);
 }
 
-// --- Main Acquisition & Telemetry Loop ---
+// --- Main Acquisition & Telemetry Loop (200ms Rate / 5Hz) ---
 void loop() {
     // 1. Maintain Flow Metrics continuously
     updateFlowMetrics();
 
-    // 2. Transmit Telemetry every 1500ms
+    // 2. Transmit Telemetry every 200ms
     static uint32_t lastTxTime = 0;
-    if (millis() - lastTxTime >= 1500) {
+    if (millis() - lastTxTime >= 200) {
         lastTxTime = millis();
 
         // Sample Median Distance from Ultrasonic Sensor
@@ -253,10 +248,10 @@ void loop() {
             static float simLevel = 65.0f;
             static bool simDirection = true;
             if (simDirection) {
-                simLevel += 0.3f;
+                simLevel += 0.06f;
                 if (simLevel >= 88.0f) simDirection = false;
             } else {
-                simLevel -= 0.2f;
+                simLevel -= 0.04f;
                 if (simLevel <= 35.0f) simDirection = true;
             }
             levelPercentage = simLevel;
@@ -283,16 +278,17 @@ void loop() {
         // Calculate CRC16-CCITT Checksum over the first 33 bytes
         packet.crc16 = calculateCrc16((const uint8_t*)&packet, sizeof(TankTelemetryPacket) - 2);
 
-        // Flash LED during RF Transmission
+        // Brief non-blocking LED flash during RF Transmission
         digitalWrite(PIN_LED, LOW); // LED ON
         int result = esp_now_send(esp32BroadcastMac, (uint8_t*)&packet, sizeof(TankTelemetryPacket));
-        delay(25);
         digitalWrite(PIN_LED, HIGH); // LED OFF
 
-        Serial.printf("[TX #%04d | Ch:%d] Tank Level: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | TDS: %3.0f ppm | CRC: 0x%04X %s\n",
-            packet.sequence_num, currentWifiChannel, levelPercentage, waterLiters, flowRateLpm, tdsPpm, packet.crc16,
-            (result == 0 ? "✓ SENT" : "✗ ERR"));
+        if (packet.sequence_num % 5 == 0) {
+            Serial.printf("[TX #%04d | 200ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | TDS: %3.0f ppm %s\n",
+                packet.sequence_num, levelPercentage, waterLiters, flowRateLpm, tdsPpm,
+                (result == 0 ? "✓ SENT" : "✗ ERR"));
+        }
     }
 
-    delay(10);
+    delay(2);
 }

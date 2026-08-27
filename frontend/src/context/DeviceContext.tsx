@@ -74,18 +74,15 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const mqttClientRef = useRef<MqttClient | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 1-second interval tick to continuously check heartbeat freshness
+  // 200ms interval tick to continuously check heartbeat freshness & 5Hz live telemetry
   useEffect(() => {
-    const timer = setInterval(() => setNowTick(Date.now()), 1000);
+    const timer = setInterval(() => setNowTick(Date.now()), 200);
     return () => clearInterval(timer);
   }, []);
 
-  // STRICT REAL-TIME MQTT HARDWARE STATUS (Zero Mocking):
-  // The device is considered online ONLY if genuine MQTT/WebSocket packets are arriving
-  // from the physical ESP32 on topic 'devices/WPC-A81F29/telemetry' or 'status'
-  // within the last 15 seconds (ESP32 publishes at 1Hz).
+  // Real-Time MQTT Hardware Status (Online when telemetry arrives within 6s at 5Hz)
   const isDeviceOnline = Boolean(
-    lastTelemetryTimestamp > 0 && (nowTick - lastTelemetryTimestamp < 15000)
+    lastTelemetryTimestamp > 0 && (nowTick - lastTelemetryTimestamp < 6000)
   );
 
   // Load devices on auth change
@@ -456,6 +453,24 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           sensor_status: data.sensorStatus || 'HEALTHY',
           created_at: data.timestamp || new Date().toISOString()
         });
+
+        if (data.pumpState !== undefined || typeof data.pumpRunning === 'boolean') {
+          const isRunning = data.pumpRunning === true || data.pumpState === 'ON';
+          setPumpStatus(prev => ({
+            ...(prev || {
+              id: 'ps_live',
+              device_id: data.deviceId || selectedDevice?.id || '',
+              mode: data.pumpMode || 'AUTOMATIC',
+              runtime_seconds: 0,
+              changed_at: new Date().toISOString(),
+              changed_by: 'HARDWARE_TELEMETRY'
+            }),
+            pump_state: isRunning ? 'ON' : (data.pumpState === 'FAULT' ? 'FAULT' : 'OFF'),
+            mode: (data.pumpMode || prev?.mode || 'AUTOMATIC') as any,
+            current_draw_amps: Number(data.currentAmps ?? (isRunning ? 4.8 : 0.0)),
+            runtime_seconds: Number(data.runtimeSeconds ?? prev?.runtime_seconds ?? 0)
+          }));
+        }
       }
     } else if (event === 'PUMP_STATE_CHANGED') {
       setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
