@@ -24,7 +24,7 @@ export const ProvisioningWizard: React.FC = () => {
   const [bleDeviceHandle, setBleDeviceHandle] = useState<any>(null);
 
   // Form Inputs
-  const [wifiSsid, setWifiSsid] = useState<string>('Monk');
+  const [wifiSsid, setWifiSsid] = useState<string>('');
   const [wifiPassword, setWifiPassword] = useState<string>('');
   const [serverHost, setServerHost] = useState<string>(
     window.location.hostname && window.location.hostname !== 'localhost'
@@ -420,6 +420,25 @@ export const ProvisioningWizard: React.FC = () => {
               >
                 Can't find device? Click to Show All Nearby Devices
               </button>
+            </div>
+
+            {/* Alternative Method 2: Wi-Fi Hotspot Captive Portal */}
+            <div className="mt-8 pt-6 border-t border-slate-700/20 max-w-lg mx-auto">
+              <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 text-left space-y-2">
+                <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs font-mono">
+                  <Radio className="w-4 h-4" />
+                  <span>ALTERNATIVE: NO BLUETOOTH / SMARTPHONE SETUP</span>
+                </div>
+                <p className="text-xs text-slate-300 font-mono">
+                  1. On your phone/laptop Wi-Fi settings, connect to hotspot: <strong className="text-cyan-400 font-mono">AquaControl-Setup</strong> (Password: <strong className="text-cyan-400 font-mono">setup1234</strong>)
+                </p>
+                <p className="text-xs text-slate-300 font-mono">
+                  2. Open browser and go to: <strong className="text-cyan-400 font-mono">http://192.168.4.1</strong>
+                </p>
+                <p className="text-xs text-slate-400 font-mono">
+                  3. Select your Wi-Fi, enter password, and click Connect!
+                </p>
+              </div>
             </div>
           </div>
         )}
