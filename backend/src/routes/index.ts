@@ -18,6 +18,7 @@ router.use('/devices', deviceRoutes);
 router.use('/pumps', pumpRoutes);
 router.use('/pump', pumpRoutes);
 router.use('/sensors', sensorRoutes);
+router.use('/telemetry', sensorRoutes);
 router.use('/automation', automationRoutes);
 router.use('/alerts', alertRoutes);
 router.use('/provision', provisionRoutes);

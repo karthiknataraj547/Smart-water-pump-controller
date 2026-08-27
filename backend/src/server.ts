@@ -70,16 +70,24 @@ async function bootstrap() {
     }
   });
 
+  // In-Memory Device Heartbeat Timestamp Registry
+  const deviceHeartbeats = new Map<string, number>();
+
   // 6. Initialize MQTT Bridge and register callbacks
   mqttBridge.init();
   mqttBridge.setCallbacks({
     onTelemetry: async (deviceUid, payload) => {
+      deviceHeartbeats.set(deviceUid, Date.now());
       await telemetryService.ingestTelemetry({ device_uid: deviceUid, ...payload });
     },
     onAck: async (deviceUid, ackData) => {
+      deviceHeartbeats.set(deviceUid, Date.now());
       await pumpControlService.handleHardwareAck(deviceUid, ackData);
     },
     onStatus: async (deviceUid, status) => {
+      if (status === 'online') {
+        deviceHeartbeats.set(deviceUid, Date.now());
+      }
       console.log(`[Status] Device ${deviceUid} reported status: ${status}`);
       try {
         const dev = await db.queryOne<any>('SELECT * FROM devices WHERE device_uid = ?', [deviceUid]);
@@ -88,19 +96,6 @@ async function bootstrap() {
             `UPDATE devices SET status = ?, last_seen = datetime('now') WHERE id = ?`,
             [status, dev.id]
           );
-          if (status === 'offline') {
-            await db.execute(
-              `UPDATE pump_status SET pump_state = 'OFF', current_draw_amps = 0.0, changed_at = datetime('now'), changed_by = 'HEARTBEAT_DISCONNECT' WHERE device_id = ?`,
-              [dev.id]
-            );
-            wsHub.broadcast('PUMP_STATE_CHANGED', {
-              deviceId: dev.id,
-              deviceUid: dev.device_uid,
-              pump_state: 'OFF',
-              current_draw_amps: 0.0,
-              runtime_seconds: 0
-            });
-          }
           wsHub.broadcast('DEVICE_STATUS_CHANGED', {
             deviceId: dev.id,
             deviceUid: dev.device_uid,
@@ -113,89 +108,29 @@ async function bootstrap() {
     }
   });
 
-  // 6. Fast Real-Time Heartbeat & Disconnect Watchdog (Scans every 1s with 5s timeout)
+  // 7. Non-Destructive Heartbeat Watchdog (Checks every 5s with 30s timeout)
   setInterval(async () => {
     try {
-      const onlineDevices = await db.query<any>(
-        `SELECT id, device_uid, last_seen FROM devices WHERE status = 'online'`
-      );
       const now = Date.now();
+      const onlineDevices = await db.query<any>(
+        `SELECT id, device_uid FROM devices WHERE status = 'online'`
+      );
       for (const dev of onlineDevices) {
-        if (!dev.last_seen) continue;
-        const rawLastSeen = String(dev.last_seen || '').trim();
-        const isoString = rawLastSeen.includes('T')
-          ? (rawLastSeen.endsWith('Z') ? rawLastSeen : rawLastSeen + 'Z')
-          : (rawLastSeen.replace(' ', 'T') + 'Z');
-        const lastSeenTime = new Date(isoString).getTime();
-        
-        // If no telemetry packet received in the last 5 seconds, instantly declare offline
-        if (!isNaN(lastSeenTime) && (now - lastSeenTime > 5000)) {
-          console.log(`[Watchdog] 🔴 Device ${dev.device_uid} unpowered/disconnected (> 5s silence). Setting OFFLINE.`);
+        const lastSeen = deviceHeartbeats.get(dev.device_uid);
+        if (lastSeen && (now - lastSeen > 30000)) {
+          console.log(`[Watchdog] Device ${dev.device_uid} inactive (> 30s silence). Marking offline.`);
           await db.execute(`UPDATE devices SET status = 'offline' WHERE id = ?`, [dev.id]);
-          await db.execute(
-            `UPDATE pump_status SET pump_state = 'OFF', current_draw_amps = 0.0, changed_at = datetime('now'), changed_by = 'WATCHDOG_TIMEOUT' WHERE device_id = ?`,
-            [dev.id]
-          );
           wsHub.broadcast('DEVICE_STATUS_CHANGED', {
             deviceId: dev.id,
             deviceUid: dev.device_uid,
             status: 'offline'
-          });
-          wsHub.broadcast('PUMP_STATE_CHANGED', {
-            deviceId: dev.id,
-            deviceUid: dev.device_uid,
-            pump_state: 'OFF',
-            current_draw_amps: 0.0,
-            runtime_seconds: 0
-          });
-          wsHub.broadcast('TELEMETRY_UPDATE', {
-            deviceId: dev.id,
-            deviceUid: dev.device_uid,
-            waterLevelPercentage: 0,
-            waterLevelLiters: 0,
-            inflowRateLpm: 0,
-            totalInflowLiters: 0,
-            tdsPpm: 0,
-            temperatureC: 0,
-            sensorStatus: 'OFFLINE',
-            timestamp: new Date().toISOString()
           });
         }
       }
     } catch (e: any) {
       console.warn('[Watchdog] Error in heartbeat scanner:', e.message);
     }
-  }, 1000);
-
-  // 6. Connect AutomationEngine triggers to PumpControlService
-  automationEngine.setActionHandler(async (deviceId, action, reason) => {
-    console.log(`[AutomationEngine] Triggering ${action} for device ${deviceId} (Reason: ${reason})`);
-    if (action === 'START') {
-      await pumpControlService.sendPumpCommand({
-        deviceId,
-        commandType: 'START_PUMP',
-        payload: { reason },
-        requestedBy: 'LOCAL_AUTOMATION_RULE',
-        source: 'automation'
-      });
-    } else if (action === 'STOP') {
-      await pumpControlService.sendPumpCommand({
-        deviceId,
-        commandType: 'STOP_PUMP',
-        payload: { reason },
-        requestedBy: 'LOCAL_AUTOMATION_RULE',
-        source: 'automation'
-      });
-    } else if (action === 'EMERGENCY_STOP') {
-      await pumpControlService.sendPumpCommand({
-        deviceId,
-        commandType: 'EMERGENCY_STOP',
-        payload: { reason },
-        requestedBy: 'SAFETY_INTERLOCK',
-        source: 'automation'
-      });
-    }
-  });
+  }, 5000);
 
   // 7. Start HTTP Server
   server.listen(ENV.PORT, () => {

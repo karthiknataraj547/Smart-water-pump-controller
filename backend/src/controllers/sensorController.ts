@@ -28,8 +28,9 @@ export async function getSensorHistory(req: AuthenticatedRequest, res: Response)
 export async function postTelemetry(req: Request, res: Response): Promise<void> {
   try {
     const payload = req.body;
-    if (!payload.device_uid || payload.water_level_pct === undefined) {
-      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'device_uid and water_level_pct are required' } });
+    const rawLevel = payload.water_level_pct !== undefined ? payload.water_level_pct : payload.water_level_percentage;
+    if (!payload.device_uid || rawLevel === undefined) {
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'device_uid and water_level_pct (or water_level_percentage) are required' } });
       return;
     }
     await telemetryService.ingestTelemetry(payload);

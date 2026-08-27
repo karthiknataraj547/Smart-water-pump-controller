@@ -115,10 +115,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Load device-specific data when selected device changes
   const loadDeviceData = useCallback(async (deviceId: string) => {
     try {
-      const [pStatus, aList, rList] = await Promise.allSettled([
+      const [pStatus, aList, rList, sLatest] = await Promise.allSettled([
         ApiService.getPumpStatus(deviceId),
         ApiService.getAlerts(deviceId),
-        ApiService.getAutomationRules(deviceId)
+        ApiService.getAutomationRules(deviceId),
+        ApiService.getLatestSensorReading(deviceId)
       ]);
 
       if (pStatus.status === 'fulfilled' && pStatus.value) {
@@ -126,6 +127,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       if (aList.status === 'fulfilled' && aList.value) setAlerts(aList.value);
       if (rList.status === 'fulfilled' && rList.value) setRules(rList.value);
+      if (sLatest.status === 'fulfilled' && sLatest.value) {
+        setTelemetry(prev => prev || sLatest.value);
+      }
     } catch (err) {
       console.warn('[DeviceContext] Error loading device details:', err);
     }
@@ -427,8 +431,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       if (status === 'offline') {
         setLastTelemetryTimestamp(0);
-        setTelemetry(null);
-        setPumpStatus(prev => prev ? { ...prev, pump_state: 'OFF', current_draw_amps: 0 } : null);
+        // Retain last known telemetry metrics so gauges remain readable
       }
     } else if (event === 'TELEMETRY_UPDATE') {
       setLastTelemetryTimestamp(Date.now());

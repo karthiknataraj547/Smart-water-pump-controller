@@ -135,6 +135,7 @@ void CloudClient::sendHttpAck(const char* commandId, const char* status, const c
     if (!wifiMgr.isConnected()) return;
 
     HTTPClient http;
+    http.setTimeout(300);
     String url = "http://" DEFAULT_API_HOST ":" + String(DEFAULT_API_PORT) + "/api/v1/pump/ack";
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
@@ -163,16 +164,20 @@ void CloudClient::sendHttpTelemetry(const TankTelemetryPacket& packet, float cur
     if (!wifiMgr.isConnected()) return;
 
     HTTPClient http;
+    http.setTimeout(300);
     String url = "http://" DEFAULT_API_HOST ":" + String(DEFAULT_API_PORT) + "/api/v1/sensors/telemetry";
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
 
     StaticJsonDocument<512> doc;
     doc["device_uid"] = DEFAULT_DEVICE_UID;
+    doc["water_level_pct"] = packet.water_level_pct;
     doc["water_level_percentage"] = packet.water_level_pct;
     doc["water_level_liters"] = packet.water_liters;
+    doc["flow_rate_lpm"] = packet.flow_rate_lpm;
     doc["inflow_rate_lpm"] = packet.flow_rate_lpm;
     doc["total_inflow_liters"] = packet.total_inflow_l;
+    doc["total_inflow_l"] = packet.total_inflow_l;
     doc["tds_ppm"] = packet.tds_ppm;
     doc["temperature_c"] = packet.temperature_c;
     doc["pump_running"] = (pumpState == PUMP_ON);

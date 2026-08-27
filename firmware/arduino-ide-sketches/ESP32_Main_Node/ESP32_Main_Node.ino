@@ -822,7 +822,7 @@ void sendHttpStateAck(const char* state, const char* initiator, const char* cmdI
 }
 
 void sendHttpTelemetry() {
-    if (WiFi.status() != WL_CONNECTED || apiServerHost.length() == 0 || apiServerHost == "192.168.31.53") return;
+    if (WiFi.status() != WL_CONNECTED || apiServerHost.length() == 0) return;
 
     HTTPClient http;
     http.setTimeout(300); // 300ms max timeout so it never blocks MQTT loop!
@@ -836,14 +836,18 @@ void sendHttpTelemetry() {
     StaticJsonDocument<512> doc;
     doc["device_uid"] = DEVICE_UID;
     doc["auth_token"] = authCode;
+    doc["water_level_pct"] = latestTankData.water_level_pct;
     doc["water_level_percentage"] = latestTankData.water_level_pct;
     doc["water_level_liters"] = latestTankData.water_liters;
+    doc["flow_rate_lpm"] = latestTankData.flow_rate_lpm;
     doc["inflow_rate_lpm"] = latestTankData.flow_rate_lpm;
     doc["total_inflow_liters"] = latestTankData.total_inflow_l;
+    doc["total_inflow_l"] = latestTankData.total_inflow_l;
     doc["tds_ppm"] = latestTankData.tds_ppm;
     doc["temperature_c"] = latestTankData.temperature_c;
     doc["pump_running"] = pumpState;
     doc["pump_state"] = pumpState ? "ON" : "OFF";
+    doc["pump_mode"] = pumpMode;
     doc["current_amps"] = currentAmps;
     doc["subnode_online"] = subNodeConnected;
 
@@ -1133,11 +1137,13 @@ void TaskNetworkLoop(void *parameter) {
                     String topic1 = String("devices/") + DEVICE_UID + "/telemetry";
                     String topic2 = String("aquacontrol/") + DEVICE_UID + "/telemetry";
                     String topic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/telemetry";
+                    String topic4 = String("aquacontrol/telemetry");
                     bool p1 = mqttClient.publish(topic1.c_str(), buffer);
                     bool p2 = mqttClient.publish(topic2.c_str(), buffer);
                     bool p3 = mqttClient.publish(topic3.c_str(), buffer);
-                    Serial.printf("[MQTT TELEMETRY] Tx Tank: %.1f%% (%4.0fL) | Flow: %.1f LPM | P1:%d P2:%d P3:%d | Bytes: %d\n",
-                        latestTankData.water_level_pct, latestTankData.water_liters, latestTankData.flow_rate_lpm, p1, p2, p3, strlen(buffer));
+                    bool p4 = mqttClient.publish(topic4.c_str(), buffer);
+                    Serial.printf("[MQTT TELEMETRY] Tx Tank: %.1f%% (%4.0fL) | Flow: %.1f LPM | P1:%d P2:%d P3:%d P4:%d | Bytes: %d\n",
+                        latestTankData.water_level_pct, latestTankData.water_liters, latestTankData.flow_rate_lpm, p1, p2, p3, p4, strlen(buffer));
                 }
             }
 
