@@ -475,8 +475,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     if (mqttClientRef.current && mqttClientRef.current.connected) {
       mqttClientRef.current.publish(`devices/${devUid}/commands`, cmdPayload, { qos: 0 });
+      mqttClientRef.current.publish(`aquacontrol/${devUid}/commands`, cmdPayload, { qos: 0 });
       mqttClientRef.current.publish(`aquacontrol/v1/devices/${devUid}/commands`, cmdPayload, { qos: 0 });
-      console.log(`[MQTT Direct] Published command to 'devices/${devUid}/commands':`, cmdPayload);
+      console.log(`[MQTT Direct] Published command to 'aquacontrol/${devUid}/commands':`, cmdPayload);
     }
   };
 
