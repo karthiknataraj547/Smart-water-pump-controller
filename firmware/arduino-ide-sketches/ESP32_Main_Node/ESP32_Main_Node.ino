@@ -349,7 +349,6 @@ class BleConfigCallbacksImpl : public BLECharacteristicCallbacks {
 void startBleProvisioning() {
     Serial.println("[BLE] Initializing standard ESP32 BLE GATT Server...");
     BLEDevice::init(PROVISION_BLE_NAME);
-    BLEDevice::setMTU(517);
     
     pBleServer = BLEDevice::createServer();
     pBleServer->setCallbacks(new BleServerCallbacksImpl());
@@ -895,12 +894,9 @@ void onEspNowDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) 
 // 9. FREERTOS SAFETY & AUTOMATION LOOP (Core 1)
 // =====================================================================
 void TaskSafetyLoop(void *parameter) {
-    esp_task_wdt_add(NULL);
     uint32_t zeroFlowStart = 0;
 
     for (;;) {
-        esp_task_wdt_reset();
-
         currentAmps = readMotorCurrent();
         if (pumpState && currentAmps > 15.0) {
             triggerEmergencyStop("Motor Overcurrent Detected (>15A)");
@@ -995,13 +991,10 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 }
 
 void TaskNetworkLoop(void *parameter) {
-    esp_task_wdt_add(NULL);
     uint32_t lastTelemetryPublish = 0;
     uint32_t lastHttpTelemetryTime = 0;
 
     for (;;) {
-        esp_task_wdt_reset();
-
         // 1. Process Captive Portal DNS & HTTP requests
         dnsServer.processNextRequest();
         localServer.handleClient();
@@ -1217,7 +1210,7 @@ void setup() {
 
     // 8. FreeRTOS Dual-Core Tasks
     xTaskCreatePinnedToCore(TaskSafetyLoop,  "TaskSafety",  4096, NULL, 5, &TaskSafetyHandle,  1); // Core 1 (Safety & Automation)
-    xTaskCreatePinnedToCore(TaskNetworkLoop, "TaskNetwork", 4096, NULL, 1, &TaskNetworkHandle, 0); // Core 0 (Networking & Cloud)
+    xTaskCreatePinnedToCore(TaskNetworkLoop, "TaskNetwork", 8192, NULL, 1, &TaskNetworkHandle, 0); // Core 0 (Networking & Cloud)
 }
 
 void loop() {
