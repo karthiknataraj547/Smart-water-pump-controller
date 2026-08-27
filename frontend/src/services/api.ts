@@ -2,15 +2,26 @@ import { Device, PumpStatus, AutomationRule, Alert, SafetyPolicy, User, AuditLog
 
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
-    const customGateway = localStorage.getItem('pump_gateway_url');
+    const customGateway = localStorage.getItem('pump_gateway_url') || localStorage.getItem('pump_custom_gateway');
     if (customGateway && customGateway.trim().length > 0) {
       return customGateway.trim().replace(/\/+$/, '');
     }
 
+    const metaEnv = (import.meta as any)?.env;
+    if (metaEnv?.VITE_API_URL) {
+      return metaEnv.VITE_API_URL.replace(/\/+$/, '');
+    }
+
     const host = window.location.hostname;
-    // If running on local network IP or localhost
-    if (host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.')) {
-      return `http://${host}:5000/api/v1`;
+    // If running on any IPv4 LAN address or localhost
+    if (host === 'localhost' || host === '127.0.0.1' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      return `${protocol}//${host}:5000/api/v1`;
+    }
+
+    // If hosted on a cloud domain with backend proxy or same origin
+    if (host && !host.includes('localhost')) {
+      return `${window.location.origin}/api/v1`;
     }
   }
   return '';
