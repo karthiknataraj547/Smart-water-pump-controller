@@ -18,9 +18,11 @@ export class PumpControlService {
   }
 
   public async getPumpStatus(deviceId: string): Promise<PumpStatus | null> {
+    const device = await db.queryOne<Device>('SELECT id FROM devices WHERE id = ? OR device_uid = ?', [deviceId, deviceId]);
+    const targetId = device ? device.id : deviceId;
     return db.queryOne<PumpStatus>(
       'SELECT * FROM pump_status WHERE device_id = ? ORDER BY changed_at DESC LIMIT 1',
-      [deviceId]
+      [targetId]
     );
   }
 
@@ -31,9 +33,9 @@ export class PumpControlService {
     requestedBy: string;
     source: 'web' | 'android' | 'windows' | 'automation';
   }): Promise<{ commandId: string; status: string; message: string }> {
-    const device = await db.queryOne<Device>('SELECT * FROM devices WHERE id = ?', [params.deviceId]);
+    const device = await db.queryOne<Device>('SELECT * FROM devices WHERE id = ? OR device_uid = ?', [params.deviceId, params.deviceId]);
     if (!device) {
-      throw new Error(`Device not found for ID ${params.deviceId}`);
+      throw new Error(`Device not found for ID or UID ${params.deviceId}`);
     }
 
     const commandId = uuidv4();
@@ -41,11 +43,11 @@ export class PumpControlService {
 
     // Validate Auto High-Level Cutoff (only blocks in AUTOMATIC mode)
     if (params.commandType === 'START_PUMP') {
-      const currentStatus = await this.getPumpStatus(params.deviceId);
+      const currentStatus = await this.getPumpStatus(device.id);
       if (currentStatus?.mode === 'AUTOMATIC') {
         const latestReading = await db.queryOne<{ water_level_percentage: number }>(
           'SELECT water_level_percentage FROM sensor_readings WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1',
-          [params.deviceId]
+          [device.id]
         );
         if (latestReading && Number(latestReading.water_level_percentage) >= 95.0) {
           throw new Error(
@@ -59,13 +61,13 @@ export class PumpControlService {
     await db.execute(
       `INSERT INTO device_commands (id, device_id, command_type, payload, status, requested_by, created_at)
        VALUES (?, ?, ?, ?, 'pending', ?, datetime('now'))`,
-      [commandId, params.deviceId, params.commandType, JSON.stringify(payload), params.requestedBy]
+      [commandId, device.id, params.commandType, JSON.stringify(payload), params.requestedBy]
     );
 
     // Audit log
     await logAudit(`COMMAND_${params.commandType}`, params.source, {
       userId: params.requestedBy,
-      deviceId: params.deviceId,
+      deviceId: device.id,
       details: JSON.stringify(payload)
     });
 
@@ -79,41 +81,49 @@ export class PumpControlService {
     if (params.commandType === 'SET_MODE' && payload.mode) {
       await db.execute(
         `UPDATE pump_status SET mode = ?, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
-        [payload.mode, params.requestedBy, params.deviceId]
+        [payload.mode, params.requestedBy, device.id]
       );
-      const updatedStatus = await this.getPumpStatus(params.deviceId);
+      const updatedStatus = await this.getPumpStatus(device.id);
       if (updatedStatus) {
         wsHub.broadcastPumpState(device.device_uid, updatedStatus);
       }
     }
 
+    // Map Action for ESP32 Firmware
+    const actionStr = params.commandType === 'START_PUMP' ? 'START' :
+                      params.commandType === 'STOP_PUMP' ? 'STOP' :
+                      params.commandType === 'EMERGENCY_STOP' ? 'EMERGENCY_STOP' :
+                      params.commandType === 'SET_MODE' ? 'SET_MODE' : params.commandType;
+
     // Publish command over MQTT to ESP32 Main Node
     mqttBridge.publishCommand(device.device_uid, {
+      cmd_id: commandId,
       command_id: commandId,
       command_type: params.commandType,
+      command: actionStr,
+      action: actionStr,
+      mode: payload.mode,
+      auth_token: 'WPC_AUTH_SECURE_KEY_2026',
+      source: params.source,
       payload,
       timestamp: Date.now()
     });
 
     // Dual-Path Direct Local HTTP REST dispatch
     if (device.local_ip && (device.local_ip.startsWith('10.') || device.local_ip.startsWith('192.168.'))) {
-      const actionMap: Record<string, string> = {
-        'START_PUMP': 'START',
-        'STOP_PUMP': 'STOP',
-        'EMERGENCY_STOP': 'EMERGENCY_STOP'
-      };
-      const action = actionMap[params.commandType] || params.commandType;
       fetch(`http://${device.local_ip}/api/v1/pump/control`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Device-Auth': device.serial_number || ''
+          'X-Device-Auth': device.serial_number || 'WPC_AUTH_SECURE_KEY_2026'
         },
         body: JSON.stringify({
-          action,
+          action: actionStr,
+          command: actionStr,
           command_type: params.commandType,
           command_id: commandId,
-          auth_code: device.serial_number || ''
+          mode: payload.mode,
+          auth_code: device.serial_number || 'WPC_AUTH_SECURE_KEY_2026'
         }),
         signal: AbortSignal.timeout(2000)
       }).catch(() => {});

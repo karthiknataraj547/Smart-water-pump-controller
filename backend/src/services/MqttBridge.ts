@@ -170,8 +170,10 @@ export class MqttBridge {
 
   public publishCommand(deviceUid: string, command: any): void {
     const topic1 = `devices/${deviceUid}/commands`;
-    const topic2 = `aquacontrol/v1/devices/${deviceUid}/commands`;
-    const payloadBuffer = Buffer.from(JSON.stringify(command));
+    const topic2 = `aquacontrol/${deviceUid}/commands`;
+    const topic3 = `aquacontrol/v1/devices/${deviceUid}/commands`;
+    const payloadStr = JSON.stringify(command);
+    const payloadBuffer = Buffer.from(payloadStr);
 
     // 1. Publish to local Aedes Broker
     if (this.aedesInstance) {
@@ -183,13 +185,22 @@ export class MqttBridge {
         retain: false,
         dup: false
       }, () => {});
+      this.aedesInstance.publish({
+        cmd: 'publish',
+        qos: 1,
+        topic: topic2,
+        payload: payloadBuffer,
+        retain: false,
+        dup: false
+      }, () => {});
     }
 
     // 2. Publish to Cloud Broker
     if (this.cloudClient && this.cloudClient.connected) {
-      this.cloudClient.publish(topic1, JSON.stringify(command), { qos: 0 });
-      this.cloudClient.publish(topic2, JSON.stringify(command), { qos: 0 });
-      console.log(`[MQTT] Cloud published command to ${topic1} & ${topic2}:`, command);
+      this.cloudClient.publish(topic1, payloadStr, { qos: 0 });
+      this.cloudClient.publish(topic2, payloadStr, { qos: 0 });
+      this.cloudClient.publish(topic3, payloadStr, { qos: 0 });
+      console.log(`[MQTT] Cloud published command to ${topic1}, ${topic2}, ${topic3}:`, command);
     }
   }
 }
