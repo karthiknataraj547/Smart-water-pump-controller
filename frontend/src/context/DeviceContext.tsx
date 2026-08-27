@@ -153,6 +153,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [selectedDevice]);
 
+  const selectedDeviceRef = useRef<Device | null>(selectedDevice);
+  useEffect(() => {
+    selectedDeviceRef.current = selectedDevice;
+  }, [selectedDevice]);
+
   // =========================================================================
   // CLOUD MQTT DIRECT WEBSOCKET CONNECTION (wss://broker.emqx.io:8084/mqtt)
   // =========================================================================
@@ -165,18 +170,21 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         clientId: `AquaControl_Web_${Math.random().toString(16).substring(2, 8)}`,
         username: 'WPC-A81F29',
         password: 'WPC_AUTH_SECURE_KEY_2026',
-        reconnectPeriod: 3000,
-        connectTimeout: 8000
+        reconnectPeriod: 2000,
+        connectTimeout: 8000,
+        keepalive: 30
       });
       mqttClientRef.current = client;
 
       client.on('connect', () => {
         console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to AquaControl topics...');
         setMqttConnected(true);
-        // Subscribe targetedly to AquaControl and our device to avoid public traffic flood
         client.subscribe('aquacontrol/WPC-A81F29/#');
         client.subscribe('aquacontrol/v1/devices/WPC-A81F29/#');
         client.subscribe('devices/WPC-A81F29/#');
+        client.subscribe('devices/+/telemetry');
+        client.subscribe('devices/+/ack');
+        client.subscribe('devices/+/status');
         client.subscribe('aquacontrol/telemetry');
         client.subscribe('aquacontrol/status');
         client.subscribe('aquacontrol/ack');
@@ -244,7 +252,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             setTelemetry({
               id: `tel_${now}`,
-              device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+              device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
               water_level_percentage: waterPct,
               water_level_liters: waterLiters,
               inflow_rate_lpm: flowRate,
@@ -260,7 +268,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               setPumpStatus(prev => ({
                 ...(prev || {
                   id: 'ps_live',
-                  device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                  device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
                   mode: data.pump_mode || 'AUTOMATIC',
                   runtime_seconds: 0,
                   changed_at: new Date().toISOString(),
@@ -277,7 +285,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setPumpStatus(prev => ({
               ...(prev || {
                 id: 'ps_live',
-                device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
                 mode: 'AUTOMATIC',
                 runtime_seconds: 0,
                 changed_at: new Date().toISOString(),
@@ -305,7 +313,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const sev = (data.severity || 'warning').toLowerCase() as 'info' | 'warning' | 'critical';
               setAlerts(prev => [{
                 id: `alt_${Date.now()}`,
-                device_id: selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
                 title: data.title || data.alert_type || 'Hardware Alert',
                 severity: (sev === 'critical' || sev === 'info') ? sev : 'warning',
                 message: data.message || 'Hardware alert condition triggered',
@@ -336,7 +344,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         mqttClientRef.current = null;
       }
     };
-  }, [selectedDevice?.id]);
+  }, []);
 
   // =========================================================================
   // LOCAL GATEWAY WEBSOCKET CONNECTION
@@ -483,34 +491,38 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Pump Command Actions
   const startPump = async () => {
-    if (!selectedDevice) return;
+    const dev = selectedDeviceRef.current || selectedDevice;
+    if (!dev) return;
     const previousState = pumpStatus;
     setCommandPending(true);
     setCommandStatusText('Energizing Relay Contactor via MQTT...');
 
     // Optimistic UI update
-    setPumpStatus(prev => prev ? { ...prev, pump_state: 'ON', current_draw_amps: 4.8 } : null);
+    setPumpStatus(prev => prev ? { ...prev, pump_state: 'ON', mode: 'MANUAL', current_draw_amps: 4.8 } : null);
 
-    // Direct MQTT Command dispatch
+    // Direct MQTT Command dispatch to hardware
     publishDirectMqttCommand('START_PUMP', 'START');
 
     try {
-      await ApiService.startPump(selectedDevice.id, user?.email || 'web_operator');
-      setCommandStatusText('Pump Energized & Confirmed!');
+      await ApiService.startPump(dev.id, user?.email || 'web_operator');
+      setCommandStatusText('Pump Start Command Dispatched!');
       setTimeout(() => {
         setCommandPending(false);
         setCommandStatusText('');
-      }, 1000);
+      }, 1500);
     } catch (err: any) {
-      setPumpStatus(previousState);
-      setCommandPending(false);
-      setCommandStatusText('');
-      alert(`Could not start pump: ${err.message}`);
+      console.warn('[DeviceContext] Backend start notification error:', err.message);
+      setCommandStatusText('Dispatched via Cloud MQTT (Awaiting Hardware ACK)...');
+      setTimeout(() => {
+        setCommandPending(false);
+        setCommandStatusText('');
+      }, 2000);
     }
   };
 
   const stopPump = async () => {
-    if (!selectedDevice) return;
+    const dev = selectedDeviceRef.current || selectedDevice;
+    if (!dev) return;
     const previousState = pumpStatus;
     setCommandPending(true);
     setCommandStatusText('De-energizing Contactor via MQTT...');
@@ -518,41 +530,44 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Optimistic UI update
     setPumpStatus(prev => prev ? { ...prev, pump_state: 'OFF', current_draw_amps: 0.0 } : null);
 
-    // Direct MQTT Command dispatch
+    // Direct MQTT Command dispatch to hardware
     publishDirectMqttCommand('STOP_PUMP', 'STOP');
 
     try {
-      await ApiService.stopPump(selectedDevice.id, user?.email || 'web_operator');
-      setCommandStatusText('Pump De-energized & Standby Confirmed');
+      await ApiService.stopPump(dev.id, user?.email || 'web_operator');
+      setCommandStatusText('Pump Stop Command Dispatched!');
       setTimeout(() => {
         setCommandPending(false);
         setCommandStatusText('');
-      }, 1000);
+      }, 1500);
     } catch (err: any) {
-      setPumpStatus(previousState);
-      setCommandPending(false);
-      setCommandStatusText('');
-      alert(`Could not stop pump: ${err.message}`);
+      console.warn('[DeviceContext] Backend stop notification error:', err.message);
+      setCommandStatusText('Dispatched via Cloud MQTT (Awaiting Hardware ACK)...');
+      setTimeout(() => {
+        setCommandPending(false);
+        setCommandStatusText('');
+      }, 2000);
     }
   };
 
   const setMode = async (mode: string) => {
-    if (!selectedDevice) return;
+    const dev = selectedDeviceRef.current || selectedDevice;
+    if (!dev) return;
     const previousMode = pumpStatus?.mode;
     setPumpStatus(prev => prev ? { ...prev, mode: mode as any } : null);
 
     publishDirectMqttCommand('SET_MODE', 'SET_MODE', { mode });
 
     try {
-      await ApiService.setPumpMode(selectedDevice.id, mode, user?.email || 'web_operator');
+      await ApiService.setPumpMode(dev.id, mode, user?.email || 'web_operator');
     } catch (err: any) {
-      setPumpStatus(prev => prev ? { ...prev, mode: (previousMode || 'AUTOMATIC') as any } : null);
-      alert(`Could not switch mode: ${err.message}`);
+      console.warn('[DeviceContext] Backend setMode notification error:', err.message);
     }
   };
 
   const emergencyStop = async (reason?: string) => {
-    if (!selectedDevice) return;
+    const dev = selectedDeviceRef.current || selectedDevice;
+    if (!dev) return;
     setCommandPending(true);
     setCommandStatusText('TRIPPING EMERGENCY MOTOR CUTOFF...');
 
@@ -561,16 +576,19 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     publishDirectMqttCommand('EMERGENCY_STOP', 'EMERGENCY_STOP', { reason: reason || 'Operator UI E-Stop' });
 
     try {
-      await ApiService.emergencyStop(selectedDevice.id, reason || 'Operator UI E-Stop');
+      await ApiService.emergencyStop(dev.id, reason || 'Operator UI E-Stop');
       setCommandStatusText('Emergency Lockout Activated!');
       setTimeout(() => {
         setCommandPending(false);
         setCommandStatusText('');
-      }, 1500);
+      }, 2000);
     } catch (err: any) {
-      setCommandPending(false);
-      setCommandStatusText('');
-      alert(`Emergency Stop failed: ${err.message}`);
+      console.warn('[DeviceContext] Backend emergencyStop notification error:', err.message);
+      setCommandStatusText('Emergency Stop Dispatched via Cloud MQTT!');
+      setTimeout(() => {
+        setCommandPending(false);
+        setCommandStatusText('');
+      }, 2000);
     }
   };
 

@@ -704,9 +704,20 @@ uint16_t calculateCrc16(const uint8_t *data, size_t length) {
 // 6. RELAY & PUMP DRIVER
 // =====================================================================
 void setPumpState(bool state, const char* initiator, const char* cmdId) {
-    // High-Level Cutoff Lock: Block START in AUTOMATIC mode if tank is full
-    if (state && pumpMode == "AUTOMATIC" && latestTankData.water_level_pct >= AUTO_STOP_LEVEL_PCT) {
-        Serial.printf("[PUMP] Rejected START in AUTOMATIC mode: Tank level %.1f%% >= %.1f%% cutoff\n",
+    // If command is from user / operator / MQTT / web / physical button, allow manual override
+    bool isManualCommand = (initiator && (
+        strstr(initiator, "MQTT") != NULL ||
+        strstr(initiator, "WEB") != NULL ||
+        strstr(initiator, "USER") != NULL ||
+        strstr(initiator, "OPERATOR") != NULL ||
+        strstr(initiator, "BUTTON") != NULL ||
+        strstr(initiator, "LOCAL_REST") != NULL ||
+        strstr(initiator, "MANUAL") != NULL
+    ));
+
+    // High-Level Cutoff Lock: Only blocks automatic rule starts when tank is full
+    if (state && !isManualCommand && pumpMode == "AUTOMATIC" && latestTankData.water_level_pct >= AUTO_STOP_LEVEL_PCT) {
+        Serial.printf("[PUMP] Rejected auto-start in AUTOMATIC mode: Tank level %.1f%% >= %.1f%% cutoff\n",
             latestTankData.water_level_pct, AUTO_STOP_LEVEL_PCT);
         publishHardwareAck("OFF", "AUTO_HIGH_CUTOFF_LOCKED", cmdId);
         sendHttpStateAck("OFF", "AUTO_HIGH_CUTOFF_LOCKED", cmdId);
@@ -720,7 +731,7 @@ void setPumpState(bool state, const char* initiator, const char* cmdId) {
 
     pumpState = state;
     if (state) {
-        digitalWrite(PIN_RELAY, LOW); // Active LOW Opto-coupler
+        digitalWrite(PIN_RELAY, LOW); // Active LOW Opto-coupler (Energize Relay)
         digitalWrite(PIN_LED_PUMP, HIGH);
         pumpStartMillis = millis();
         Serial.printf("[PUMP] ENERGIZED (Active LOW) by %s\n", initiator);
@@ -761,6 +772,7 @@ void publishHardwareAck(const char* state, const char* initiator, const char* cm
     StaticJsonDocument<384> doc;
     doc["device_uid"] = DEVICE_UID;
     if (cmdId && strlen(cmdId) > 0) doc["cmd_id"] = cmdId;
+    doc["command_id"] = cmdId;
     doc["status"] = systemFault ? "FAILED" : "SUCCESS";
     doc["confirmed_state"] = state;
     doc["pump_state"] = pumpState ? "ON" : "OFF";
@@ -772,16 +784,19 @@ void publishHardwareAck(const char* state, const char* initiator, const char* cm
     char buffer[384];
     serializeJson(doc, buffer);
     String topic1 = String("devices/") + DEVICE_UID + "/ack";
-    String topic2 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/ack";
+    String topic2 = String("aquacontrol/") + DEVICE_UID + "/ack";
+    String topic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/ack";
     mqttClient.publish(topic1.c_str(), buffer, true);
     mqttClient.publish(topic2.c_str(), buffer, true);
+    mqttClient.publish(topic3.c_str(), buffer, true);
     Serial.printf("[MQTT ACK] Published confirmation: %s\n", buffer);
 }
 
 void sendHttpStateAck(const char* state, const char* initiator, const char* cmdId) {
-    if (WiFi.status() != WL_CONNECTED || apiServerHost.length() == 0) return;
+    if (WiFi.status() != WL_CONNECTED || apiServerHost.length() == 0 || apiServerHost == "192.168.31.53") return;
 
     HTTPClient http;
+    http.setTimeout(300); // 300ms max timeout so it never blocks MQTT loop!
     String url = String("http://") + apiServerHost + ":" + String(apiServerPort) + "/api/v1/pump/ack";
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
@@ -807,9 +822,10 @@ void sendHttpStateAck(const char* state, const char* initiator, const char* cmdI
 }
 
 void sendHttpTelemetry() {
-    if (WiFi.status() != WL_CONNECTED || apiServerHost.length() == 0) return;
+    if (WiFi.status() != WL_CONNECTED || apiServerHost.length() == 0 || apiServerHost == "192.168.31.53") return;
 
     HTTPClient http;
+    http.setTimeout(300); // 300ms max timeout so it never blocks MQTT loop!
     String url = String("http://") + apiServerHost + ":" + String(apiServerPort) + "/api/v1/sensors/telemetry";
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
@@ -972,6 +988,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (action.equalsIgnoreCase("START") || action.equalsIgnoreCase("START_PUMP") || action.equalsIgnoreCase("ON")) {
         systemFault = false;
         digitalWrite(PIN_LED_FAULT, LOW);
+        pumpMode = "MANUAL"; // Explicit manual command from app switches to MANUAL mode
         setPumpState(true, initiator.c_str(), cmdId.c_str());
     } else if (action.equalsIgnoreCase("STOP") || action.equalsIgnoreCase("STOP_PUMP") || action.equalsIgnoreCase("OFF")) {
         setPumpState(false, initiator.c_str(), cmdId.c_str());
