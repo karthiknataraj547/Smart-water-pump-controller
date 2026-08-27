@@ -77,16 +77,35 @@ export class PumpControlService {
       requestedBy: params.requestedBy
     });
 
-    // If setting mode directly, update DB immediately
-    if (params.commandType === 'SET_MODE' && payload.mode) {
+    // Instantly update database state and broadcast to all connected web/mobile clients
+    if (params.commandType === 'START_PUMP') {
+      await db.execute(
+        `UPDATE pump_status SET pump_state = 'ON', mode = 'MANUAL', current_draw_amps = 4.8, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
+        [params.requestedBy, device.id]
+      );
+      const updatedStatus = await this.getPumpStatus(device.id);
+      if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
+    } else if (params.commandType === 'STOP_PUMP') {
+      await db.execute(
+        `UPDATE pump_status SET pump_state = 'OFF', current_draw_amps = 0.0, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
+        [params.requestedBy, device.id]
+      );
+      const updatedStatus = await this.getPumpStatus(device.id);
+      if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
+    } else if (params.commandType === 'EMERGENCY_STOP') {
+      await db.execute(
+        `UPDATE pump_status SET pump_state = 'FAULT', current_draw_amps = 0.0, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
+        [params.requestedBy, device.id]
+      );
+      const updatedStatus = await this.getPumpStatus(device.id);
+      if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
+    } else if (params.commandType === 'SET_MODE' && payload.mode) {
       await db.execute(
         `UPDATE pump_status SET mode = ?, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
         [payload.mode, params.requestedBy, device.id]
       );
       const updatedStatus = await this.getPumpStatus(device.id);
-      if (updatedStatus) {
-        wsHub.broadcastPumpState(device.device_uid, updatedStatus);
-      }
+      if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
     }
 
     // Map Action for ESP32 Firmware

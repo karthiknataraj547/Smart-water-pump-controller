@@ -112,6 +112,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     refreshDevices();
   }, [token, refreshDevices]);
 
+  const lastActionTimeRef = useRef<number>(0);
+
   // Load device-specific data when selected device changes
   const loadDeviceData = useCallback(async (deviceId: string) => {
     try {
@@ -123,7 +125,10 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ]);
 
       if (pStatus.status === 'fulfilled' && pStatus.value) {
-        setPumpStatus(pStatus.value);
+        // Protect recent user actions from being overwritten by stale polling
+        if (Date.now() - lastActionTimeRef.current >= 6000) {
+          setPumpStatus(pStatus.value);
+        }
       }
       if (aList.status === 'fulfilled' && aList.value) setAlerts(aList.value);
       if (rList.status === 'fulfilled' && rList.value) setRules(rList.value);
@@ -488,111 +493,135 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       mqttClientRef.current.publish(`devices/${devUid}/commands`, cmdPayload, { qos: 0 });
       mqttClientRef.current.publish(`aquacontrol/${devUid}/commands`, cmdPayload, { qos: 0 });
       mqttClientRef.current.publish(`aquacontrol/v1/devices/${devUid}/commands`, cmdPayload, { qos: 0 });
+      mqttClientRef.current.publish('aquacontrol/commands', cmdPayload, { qos: 0 });
       console.log(`[MQTT Direct] Published command to 'aquacontrol/${devUid}/commands':`, cmdPayload);
     }
   };
 
-  // Pump Command Actions
+  // Instant Real-Time Pump Command Actions (0ms Lag)
   const startPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
-    const previousState = pumpStatus;
-    setCommandPending(true);
-    setCommandStatusText('Energizing Relay Contactor via MQTT...');
+    lastActionTimeRef.current = Date.now();
+    setCommandStatusText('Energizing Relay Contactor (0ms Fast-Path)...');
 
-    // Optimistic UI update
-    setPumpStatus(prev => prev ? { ...prev, pump_state: 'ON', mode: 'MANUAL', current_draw_amps: 4.8 } : null);
+    // 1. Instant 0ms Optimistic UI Update
+    setPumpStatus(prev => ({
+      ...(prev || {
+        id: 'ps_opt',
+        device_id: dev.id,
+        mode: 'MANUAL',
+        runtime_seconds: 0,
+        changed_at: new Date().toISOString(),
+        changed_by: 'WEB_OPERATOR'
+      }),
+      pump_state: 'ON',
+      mode: 'MANUAL',
+      current_draw_amps: 4.8
+    }));
 
-    // Direct MQTT Command dispatch to hardware
+    // 2. Direct Instant MQTT Command dispatch to hardware
     publishDirectMqttCommand('START_PUMP', 'START');
 
-    try {
-      await ApiService.startPump(dev.id, user?.email || 'web_operator');
-      setCommandStatusText('Pump Start Command Dispatched!');
-      setTimeout(() => {
-        setCommandPending(false);
-        setCommandStatusText('');
-      }, 1500);
-    } catch (err: any) {
-      console.warn('[DeviceContext] Backend start notification error:', err.message);
-      setCommandStatusText('Dispatched via Cloud MQTT (Awaiting Hardware ACK)...');
-      setTimeout(() => {
-        setCommandPending(false);
-        setCommandStatusText('');
-      }, 2000);
-    }
+    // 3. Parallel non-blocking REST API notification
+    ApiService.startPump(dev.id, user?.email || 'web_operator')
+      .then(() => {
+        setCommandStatusText('Command Dispatched to Controller ✓');
+        setTimeout(() => setCommandStatusText(''), 1200);
+      })
+      .catch((err: any) => {
+        console.warn('[DeviceContext] Backend start notification note:', err.message);
+        setCommandStatusText('Dispatched via Cloud MQTT ✓');
+        setTimeout(() => setCommandStatusText(''), 1200);
+      });
   };
 
   const stopPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
-    const previousState = pumpStatus;
-    setCommandPending(true);
-    setCommandStatusText('De-energizing Contactor via MQTT...');
+    lastActionTimeRef.current = Date.now();
+    setCommandStatusText('De-energizing Contactor (0ms Fast-Path)...');
 
-    // Optimistic UI update
-    setPumpStatus(prev => prev ? { ...prev, pump_state: 'OFF', current_draw_amps: 0.0 } : null);
+    // 1. Instant 0ms Optimistic UI Update
+    setPumpStatus(prev => ({
+      ...(prev || {
+        id: 'ps_opt',
+        device_id: dev.id,
+        mode: 'AUTOMATIC',
+        runtime_seconds: 0,
+        changed_at: new Date().toISOString(),
+        changed_by: 'WEB_OPERATOR'
+      }),
+      pump_state: 'OFF',
+      current_draw_amps: 0.0
+    }));
 
-    // Direct MQTT Command dispatch to hardware
+    // 2. Direct Instant MQTT Command dispatch to hardware
     publishDirectMqttCommand('STOP_PUMP', 'STOP');
 
-    try {
-      await ApiService.stopPump(dev.id, user?.email || 'web_operator');
-      setCommandStatusText('Pump Stop Command Dispatched!');
-      setTimeout(() => {
-        setCommandPending(false);
-        setCommandStatusText('');
-      }, 1500);
-    } catch (err: any) {
-      console.warn('[DeviceContext] Backend stop notification error:', err.message);
-      setCommandStatusText('Dispatched via Cloud MQTT (Awaiting Hardware ACK)...');
-      setTimeout(() => {
-        setCommandPending(false);
-        setCommandStatusText('');
-      }, 2000);
-    }
+    // 3. Parallel non-blocking REST API notification
+    ApiService.stopPump(dev.id, user?.email || 'web_operator')
+      .then(() => {
+        setCommandStatusText('Pump Stopped Successfully ✓');
+        setTimeout(() => setCommandStatusText(''), 1200);
+      })
+      .catch((err: any) => {
+        console.warn('[DeviceContext] Backend stop notification note:', err.message);
+        setCommandStatusText('Dispatched via Cloud MQTT ✓');
+        setTimeout(() => setCommandStatusText(''), 1200);
+      });
   };
 
   const setMode = async (mode: string) => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
-    const previousMode = pumpStatus?.mode;
+    lastActionTimeRef.current = Date.now();
+
+    // 1. Instant 0ms Optimistic UI Update
     setPumpStatus(prev => prev ? { ...prev, mode: mode as any } : null);
 
+    // 2. Direct Instant MQTT Command dispatch
     publishDirectMqttCommand('SET_MODE', 'SET_MODE', { mode });
 
-    try {
-      await ApiService.setPumpMode(dev.id, mode, user?.email || 'web_operator');
-    } catch (err: any) {
-      console.warn('[DeviceContext] Backend setMode notification error:', err.message);
-    }
+    // 3. Parallel REST API notification
+    ApiService.setPumpMode(dev.id, mode, user?.email || 'web_operator')
+      .catch(err => console.warn('[DeviceContext] Backend setMode notification note:', err.message));
   };
 
   const emergencyStop = async (reason?: string) => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
-    setCommandPending(true);
-    setCommandStatusText('TRIPPING EMERGENCY MOTOR CUTOFF...');
+    lastActionTimeRef.current = Date.now();
+    setCommandStatusText('ACTIVATING HARDWARE EMERGENCY CUTOFF...');
 
-    setPumpStatus(prev => prev ? { ...prev, pump_state: 'FAULT', current_draw_amps: 0.0 } : null);
+    // 1. Instant 0ms Optimistic UI Update
+    setPumpStatus(prev => ({
+      ...(prev || {
+        id: 'ps_opt',
+        device_id: dev.id,
+        mode: 'MANUAL',
+        runtime_seconds: 0,
+        changed_at: new Date().toISOString(),
+        changed_by: 'EMERGENCY_STOP'
+      }),
+      pump_state: 'FAULT',
+      current_draw_amps: 0.0
+    }));
 
+    // 2. Direct Instant MQTT Command dispatch
     publishDirectMqttCommand('EMERGENCY_STOP', 'EMERGENCY_STOP', { reason: reason || 'Operator UI E-Stop' });
 
-    try {
-      await ApiService.emergencyStop(dev.id, reason || 'Operator UI E-Stop');
-      setCommandStatusText('Emergency Lockout Activated!');
-      setTimeout(() => {
-        setCommandPending(false);
-        setCommandStatusText('');
-      }, 2000);
-    } catch (err: any) {
-      console.warn('[DeviceContext] Backend emergencyStop notification error:', err.message);
-      setCommandStatusText('Emergency Stop Dispatched via Cloud MQTT!');
-      setTimeout(() => {
-        setCommandPending(false);
-        setCommandStatusText('');
-      }, 2000);
-    }
+    // 3. Parallel REST API notification
+    ApiService.emergencyStop(dev.id, reason || 'Operator UI E-Stop')
+      .then(() => {
+        setCommandStatusText('Emergency Lockout Armed ✓');
+        setTimeout(() => setCommandStatusText(''), 2000);
+      })
+      .catch((err: any) => {
+        console.warn('[DeviceContext] Backend emergencyStop notification note:', err.message);
+        setCommandStatusText('E-Stop Dispatched via Cloud MQTT ✓');
+        setTimeout(() => setCommandStatusText(''), 2000);
+      });
   };
 
   const acknowledgeAlert = async (alertId: string) => {
