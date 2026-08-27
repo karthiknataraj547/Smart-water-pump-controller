@@ -214,32 +214,72 @@ void saveCredentials(const String& ssid, const String& pass, const String& broke
 // =====================================================================
 // 2. CREDENTIAL INGESTION (Shared by BLE, Captive Portal & Serial CLI)
 // =====================================================================
-void handleApplyCredentials(const String& jsonString) {
-    Serial.printf("[PROVISION] Ingesting credentials: %s\n", jsonString.c_str());
+const char* getWifiStatusText(wl_status_t status) {
+    switch (status) {
+        case WL_IDLE_STATUS:     return "IDLE (Initializing)";
+        case WL_NO_SSID_AVAIL:   return "NO SSID AVAIL (Network not found - check 2.4GHz)";
+        case WL_SCAN_COMPLETED:  return "SCAN COMPLETED";
+        case WL_CONNECTED:       return "CONNECTED";
+        case WL_CONNECT_FAILED:  return "CONNECT FAILED (Check password / auth)";
+        case WL_CONNECTION_LOST: return "CONNECTION LOST";
+        case WL_DISCONNECTED:    return "DISCONNECTED (Attempting handshake)";
+        default:                 return "UNKNOWN STATUS";
+    }
+}
 
-    StaticJsonDocument<512> doc;
-    DeserializationError err = deserializeJson(doc, jsonString);
-    if (err) {
-        Serial.printf("[PROVISION] JSON parse error: %s\n", err.c_str());
-        return;
+void handleApplyCredentials(const String& rawInput) {
+    String input = rawInput;
+    input.trim();
+    Serial.printf("[PROVISION] Ingesting credentials (%d bytes): %s\n", input.length(), input.c_str());
+
+    String newSsid = "";
+    String newPass = "";
+    String newBroker = DEFAULT_MQTT_BROKER;
+    int mPortVal = DEFAULT_MQTT_PORT;
+    String newHost = DEFAULT_SERVER_HOST;
+    int portVal = DEFAULT_SERVER_PORT;
+    String newAuth = "WPC_AUTH_SECURE_KEY_2026";
+
+    // Format 1: Text format "WIFI:SSID:PASS" or "WIFI:SSID:PASS:BROKER"
+    if (input.startsWith("WIFI:") || input.startsWith("wifi:")) {
+        int firstColon = input.indexOf(':', 5);
+        if (firstColon > 0) {
+            newSsid = input.substring(5, firstColon);
+            int secondColon = input.indexOf(':', firstColon + 1);
+            newPass = (secondColon > 0) ? input.substring(firstColon + 1, secondColon) : input.substring(firstColon + 1);
+            if (secondColon > 0) {
+                newBroker = input.substring(secondColon + 1);
+            }
+        }
+    } else {
+        // Format 2: JSON payload (supports compact and full keys)
+        StaticJsonDocument<512> doc;
+        DeserializationError err = deserializeJson(doc, input);
+        if (!err) {
+            const char* sVal = doc["s"] | doc["ssid"] | doc["wifi_ssid"] | "";
+            const char* pVal = doc["p"] | doc["password"] | doc["wifi_password"] | doc["pass"] | "";
+            const char* bVal = doc["b"] | doc["mqtt_broker"] | doc["mqtt_host"] | doc["broker"] | DEFAULT_MQTT_BROKER;
+            const char* hVal = doc["h"] | doc["server_host"] | doc["api_host"] | bVal;
+            const char* aVal = doc["auth"] | doc["auth_code"] | doc["auth_token"] | "WPC_AUTH_SECURE_KEY_2026";
+
+            newSsid = String(sVal);
+            newPass = String(pVal);
+            newBroker = String(bVal);
+            mPortVal = doc["mqtt_port"] | DEFAULT_MQTT_PORT;
+            newHost = String(hVal);
+            portVal = doc["port"] | doc["server_port"] | doc["api_port"] | DEFAULT_SERVER_PORT;
+            newAuth = String(aVal);
+        } else {
+            Serial.printf("[PROVISION] JSON parse error: %s (Raw payload: '%s')\n", err.c_str(), input.c_str());
+            return;
+        }
     }
 
-    const char* ssidVal   = doc["s"] | doc["ssid"] | doc["wifi_ssid"] | "";
-    const char* passVal   = doc["p"] | doc["password"] | doc["wifi_password"] | "";
-    const char* brokerVal = doc["mqtt_broker"] | doc["mqtt_host"] | doc["broker"] | DEFAULT_MQTT_BROKER;
-    int mPortVal          = doc["mqtt_port"] | DEFAULT_MQTT_PORT;
-    const char* hostVal   = doc["h"] | doc["server_host"] | doc["api_host"] | brokerVal;
-    int portVal           = doc["port"] | doc["server_port"] | doc["api_port"] | DEFAULT_SERVER_PORT;
-    const char* authVal   = doc["auth"] | doc["auth_code"] | doc["auth_token"] | "WPC_AUTH_SECURE_KEY_2026";
-
-    String newSsid = String(ssidVal);
-    String newPass = String(passVal);
-    String newBroker = String(brokerVal);
-    String newHost = String(hostVal);
-    String newAuth = String(authVal);
+    newSsid.trim();
+    newPass.trim();
 
     if (newSsid.length() == 0) {
-        Serial.println("[PROVISION] Error: Empty SSID received!");
+        Serial.println("[PROVISION] Error: Empty SSID received! Wi-Fi connection cancelled.");
         return;
     }
 
@@ -251,14 +291,11 @@ void handleApplyCredentials(const String& jsonString) {
     apiServerPort = portVal;
     authCode = (newAuth.length() > 0) ? newAuth : "WPC_AUTH_SECURE_KEY_2026";
 
+    // Save permanently to NVS Flash
     saveCredentials(wifiSsid, wifiPass, mqttBroker, mqttPort, apiServerHost, apiServerPort, authCode);
 
-    // Notify BLE client
-    if (pBleStatusChar) {
-        String resp = "{\"status\":\"configured\",\"ssid\":\"" + wifiSsid + "\",\"mqtt\":\"" + mqttBroker + "\",\"reconnecting\":true}";
-        pBleStatusChar->setValue(resp.c_str());
-        pBleStatusChar->notify();
-    }
+    // Reset Wi-Fi check timer so background task does not interrupt connection
+    lastWifiCheck = millis();
 
     // Audible confirmation beeps
     for (int i = 0; i < 2; i++) {
@@ -266,11 +303,23 @@ void handleApplyCredentials(const String& jsonString) {
         digitalWrite(PIN_BUZZER, LOW);  delay(80);
     }
 
-    Serial.printf("[PROVISION] Credentials accepted! Connecting to '%s' & MQTT '%s:%d'...\n",
-        wifiSsid.c_str(), mqttBroker.c_str(), mqttPort);
+    Serial.printf("[PROVISION] ✓ Credentials Saved! Connecting to Wi-Fi SSID: '%s' (Password length: %d chars) | Broker: '%s:%d'...\n",
+        wifiSsid.c_str(), wifiPass.length(), mqttBroker.c_str(), mqttPort);
 
-    WiFi.disconnect(false);
+    // Reset connection and start STA handshake with power save disabled
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.setSleep(false); // Prevent modem sleep from dropping handshakes
+    WiFi.setAutoReconnect(true);
     WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+
+    // Notify BLE client if connected
+    if (pBleStatusChar) {
+        String resp = "{\"status\":\"configured\",\"ssid\":\"" + wifiSsid + "\",\"mqtt\":\"" + mqttBroker + "\",\"reconnecting\":true}";
+        pBleStatusChar->setValue(resp.c_str());
+        pBleStatusChar->notify();
+    }
 }
 
 // =====================================================================
@@ -290,7 +339,7 @@ class BleServerCallbacksImpl : public BLEServerCallbacks {
 
 class BleConfigCallbacksImpl : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pChar) {
-        String val = pChar->getValue();
+        String val = String(pChar->getValue().c_str());
         if (val.length() > 0) {
             handleApplyCredentials(val);
         }
@@ -300,6 +349,7 @@ class BleConfigCallbacksImpl : public BLECharacteristicCallbacks {
 void startBleProvisioning() {
     Serial.println("[BLE] Initializing standard ESP32 BLE GATT Server...");
     BLEDevice::init(PROVISION_BLE_NAME);
+    BLEDevice::setMTU(517);
     
     pBleServer = BLEDevice::createServer();
     pBleServer->setCallbacks(new BleServerCallbacksImpl());
@@ -340,7 +390,7 @@ void startBleProvisioning() {
     pAdvertising->setMinPreferred(0x12);
     BLEDevice::startAdvertising();
 
-    Serial.printf("[BLE] ✓ BLE Beacon Active: '%s' | Service: %s\n", PROVISION_BLE_NAME, BLE_SERVICE_UUID);
+    Serial.printf("[BLE] ✓ BLE Beacon Active: '%s' | Service: %s (MTU: 517)\n", PROVISION_BLE_NAME, BLE_SERVICE_UUID);
 }
 
 // =====================================================================
@@ -957,20 +1007,27 @@ void TaskNetworkLoop(void *parameter) {
         localServer.handleClient();
 
         // 2. Wi-Fi Connection State Machine
-        if (WiFi.status() == WL_CONNECTED) {
+        wl_status_t currentStatus = WiFi.status();
+        if (currentStatus == WL_CONNECTED) {
             if (!wifiConnected) {
                 wifiConnected = true;
-                Serial.printf("[WiFi STA] ✓ Connected! IP Address: %s (RSSI: %d dBm)\n",
-                    WiFi.localIP().toString().c_str(), WiFi.RSSI());
+                Serial.printf("[WiFi STA] ✓ Connected! IP: %s | Gateway: %s | RSSI: %d dBm\n",
+                    WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(), WiFi.RSSI());
             }
         } else {
             if (wifiConnected) {
                 wifiConnected = false;
-                Serial.println("[WiFi STA] Connection lost. Waiting to reconnect...");
+                Serial.printf("[WiFi STA] Connection lost. Status: %s (%d)\n",
+                    getWifiStatusText(currentStatus), currentStatus);
             }
-            if (wifiSsid.length() > 0 && millis() - lastWifiCheck > 12000) {
+            if (wifiSsid.length() > 0 && millis() - lastWifiCheck > 10000) {
                 lastWifiCheck = millis();
-                Serial.printf("[WiFi STA] Connecting to '%s'...\n", wifiSsid.c_str());
+                Serial.printf("[WiFi STA] Connecting to '%s' (Current Status: %s [%d])...\n",
+                    wifiSsid.c_str(), getWifiStatusText(currentStatus), currentStatus);
+                WiFi.disconnect(false);
+                delay(50);
+                WiFi.setSleep(false);
+                WiFi.setAutoReconnect(true);
                 WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
             }
         }
@@ -1136,7 +1193,9 @@ void setup() {
 
     // 6. Connect to saved Wi-Fi if available
     if (wifiSsid.length() > 0) {
-        Serial.printf("[WiFi STA] Connecting to '%s'...\n", wifiSsid.c_str());
+        Serial.printf("[WiFi STA] Connecting to saved Wi-Fi '%s'...\n", wifiSsid.c_str());
+        WiFi.setSleep(false);
+        WiFi.setAutoReconnect(true);
         WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
     } else {
         Serial.println("[WiFi STA] No saved Wi-Fi. Connect to 'AquaControl-Setup' or use BLE/Serial to configure.");

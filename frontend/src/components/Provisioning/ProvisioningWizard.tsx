@@ -146,33 +146,25 @@ export const ProvisioningWizard: React.FC = () => {
   const handleCompleteProvisioning = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedDevice || !bleDeviceHandle) {
-      setErrorMsg('No Bluetooth device connected. Please pair your ESP32 first.');
+      setErrorMsg('No Bluetooth device connected. Please pair your ESP32 first, or use the Hotspot method.');
       return;
     }
 
     setProvisioning(true);
     setErrorMsg('');
-    setStatusMessage('1/3 Encoding Wi-Fi, MQTT, WebSocket, API & Auth Token...');
+    setStatusMessage('1/3 Encoding Wi-Fi, MQTT & Auth Token...');
     const authCode = 'WPC_AUTH_SECURE_KEY_2026';
     const mqttBrokerHost = 'broker.emqx.io';
     const apiUrl = `http://${serverHost}:${serverPort}/api/v1`;
-    const wsUrl = `ws://${serverHost}:${serverPort}/ws`;
     addLog(`Preparing Wi-Fi & Auth payload: SSID="${wifiSsid}", Broker="${mqttBrokerHost}:1883", API="${apiUrl}", Auth="${authCode}"`);
 
+    // Streamlined compact payload to guarantee zero BLE MTU truncation
     const credPayload = JSON.stringify({
-      s: wifiSsid,
+      s: wifiSsid.trim(),
       p: wifiPassword,
-      ssid: wifiSsid,
-      password: wifiPassword,
-      h: serverHost,
-      port: serverPort,
-      server_host: serverHost,
-      server_port: serverPort,
-      mqtt_broker: mqttBrokerHost,
-      mqtt_port: 1883,
-      auth: authCode,
-      auth_code: authCode,
-      auth_token: authCode
+      b: mqttBrokerHost,
+      h: serverHost.trim(),
+      auth: authCode
     });
 
     let blePushed = false;
@@ -261,7 +253,7 @@ export const ProvisioningWizard: React.FC = () => {
         throw new Error('Config write characteristic not found on Bluetooth service.');
       }
 
-      addLog(`Writing Wi-Fi credentials payload (${credPayload.length} bytes) to hardware over BLE...`);
+      addLog(`Writing Wi-Fi credentials (${credPayload.length} bytes) to hardware over BLE...`);
       const encoder = new TextEncoder();
       const payloadBytes = encoder.encode(credPayload);
       if (typeof char.writeValueWithResponse === 'function') {
@@ -273,9 +265,7 @@ export const ProvisioningWizard: React.FC = () => {
       addLog('✓ REALTIME HARDWARE ACK: Wi-Fi credentials acknowledged by ESP32!');
       blePushed = true;
 
-      // =====================================================================
-      // AUTOMATIC BLE DISCONNECTION ONCE CREDENTIALS ARE DELIVERED
-      // =====================================================================
+      // Automatic clean BLE disconnection
       addLog('🔌 Wi-Fi provisioning complete -> Disconnecting Bluetooth link...');
       if (bleDeviceHandle?.gatt?.connected) {
         bleDeviceHandle.gatt.disconnect();
@@ -286,20 +276,16 @@ export const ProvisioningWizard: React.FC = () => {
       addLog(`❌ BLE write error: ${bleErr.message}`);
     }
 
-    // STRICT VERIFICATION: DO NOT MOCK OR ADVANCE TO SUCCESS IF BLE FAILED
     if (!blePushed) {
       setProvisioning(false);
-      const failMsg = 'TRANSMISSION FAILED: Could not deliver credentials to ESP32 over Bluetooth.';
+      const failMsg = 'TRANSMISSION FAILED: Could not deliver credentials over Bluetooth.';
       setErrorMsg(failMsg);
       addLog(`❌ ${failMsg}`);
-      addLog('👉 STEPS TO FIX:');
-      addLog('  1. Ensure ESP32 is running the updated ESP32_Main_Node sketch in Arduino IDE.');
-      addLog('  2. Verify the built-in LED (GPIO 2) is blinking (500ms) indicating BLE advertising mode.');
-      addLog('  3. Click "PAIR ESP32 VIA BLUETOOTH" and retry.');
+      addLog('👉 ALTERNATIVE: Use Method 2 (Connect phone/PC to "AquaControl-Setup" Wi-Fi hotspot -> http://192.168.4.1).');
       return;
     }
 
-    // STEP C: Register Device in Central Cloud Database
+    // Step C: Register Device in Central Cloud Database
     try {
       setStatusMessage('3/3 Registering with Cloud Gateway & Arming Automation...');
       addLog('Registering device metadata in Central Gateway DB...');
@@ -314,13 +300,66 @@ export const ProvisioningWizard: React.FC = () => {
       addLog(`⚠️ Cloud registration note: ${cloudErr.message}`);
     }
 
-    addLog('🎉 SUCCESS: ESP32 received Wi-Fi credentials!');
+    addLog('🎉 SUCCESS: ESP32 received Wi-Fi credentials and saved to NVS Flash!');
     addLog('👉 HARDWARE STATUS: Built-in LED on ESP32 (GPIO 2) will turn SOLID ON once connected to your Wi-Fi.');
 
     await new Promise(r => setTimeout(r, 1200));
     await refreshDevices();
     setProvisioning(false);
     setStep(4);
+  };
+
+  // Direct HTTP Hotspot Provisioning Handler (192.168.4.1)
+  const handleHttpProvisioning = async (targetHost = '192.168.4.1') => {
+    if (!wifiSsid.trim()) {
+      setErrorMsg('Please enter your Wi-Fi SSID.');
+      return;
+    }
+
+    setProvisioning(true);
+    setErrorMsg('');
+    setStatusMessage(`Pushing Wi-Fi credentials to ESP32 at http://${targetHost}...`);
+    addLog(`Sending Wi-Fi credentials to http://${targetHost}/api/v1/wifi/config...`);
+
+    const payload = {
+      s: wifiSsid.trim(),
+      p: wifiPassword,
+      b: 'broker.emqx.io',
+      h: serverHost.trim(),
+      auth: 'WPC_AUTH_SECURE_KEY_2026'
+    };
+
+    try {
+      const resp = await fetch(`http://${targetHost}/api/v1/wifi/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (resp.ok) {
+        addLog('✓ REALTIME ACK: ESP32 acknowledged credentials over HTTP!');
+        addLog('👉 Built-in LED on ESP32 (GPIO 2) will turn SOLID ON once connected to Wi-Fi.');
+        
+        try {
+          await ApiService.completeProvisioning({
+            deviceUid: 'WPC-A81F29',
+            wifiSsid,
+            tankCapacityLiters: tankCapacity,
+            tankHeightCm: tankHeight
+          });
+        } catch (e) {}
+
+        await refreshDevices();
+        setProvisioning(false);
+        setStep(4);
+      } else {
+        throw new Error(`ESP32 returned HTTP ${resp.status}`);
+      }
+    } catch (err: any) {
+      addLog(`❌ Hotspot HTTP push error: ${err.message}`);
+      setErrorMsg(`Could not connect to http://${targetHost}. Ensure your device is currently connected to the "AquaControl-Setup" Wi-Fi hotspot, or use Bluetooth.`);
+      setProvisioning(false);
+    }
   };
 
   return (
@@ -424,20 +463,42 @@ export const ProvisioningWizard: React.FC = () => {
 
             {/* Alternative Method 2: Wi-Fi Hotspot Captive Portal */}
             <div className="mt-8 pt-6 border-t border-slate-700/20 max-w-lg mx-auto">
-              <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 text-left space-y-2">
+              <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 text-left space-y-3">
                 <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs font-mono">
                   <Radio className="w-4 h-4" />
-                  <span>ALTERNATIVE: NO BLUETOOTH / SMARTPHONE SETUP</span>
+                  <span>METHOD 2: DIRECT WI-FI HOTSPOT SETUP (NO BLUETOOTH NEEDED)</span>
                 </div>
                 <p className="text-xs text-slate-300 font-mono">
-                  1. On your phone/laptop Wi-Fi settings, connect to hotspot: <strong className="text-cyan-400 font-mono">AquaControl-Setup</strong> (Password: <strong className="text-cyan-400 font-mono">setup1234</strong>)
+                  1. Connect your phone/laptop Wi-Fi to hotspot: <strong className="text-cyan-400 font-mono">AquaControl-Setup</strong> (Password: <strong className="text-cyan-400 font-mono">setup1234</strong>)
                 </p>
                 <p className="text-xs text-slate-300 font-mono">
-                  2. Open browser and go to: <strong className="text-cyan-400 font-mono">http://192.168.4.1</strong>
+                  2. Open browser and visit: <strong className="text-cyan-400 font-mono">http://192.168.4.1</strong>
                 </p>
                 <p className="text-xs text-slate-400 font-mono">
-                  3. Select your Wi-Fi, enter password, and click Connect!
+                  3. Select your 2.4GHz Wi-Fi, enter password, and click Connect!
                 </p>
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDevice({
+                        deviceUid: 'WPC-A81F29',
+                        name: 'ESP32 Hotspot Node',
+                        model: 'ESP32-WROOM-32',
+                        signalRssi: -30,
+                        signalQuality: 'Excellent',
+                        status: 'Hotspot Mode (192.168.4.1)',
+                        macAddress: '192.168.4.1',
+                        advertisedServices: []
+                      });
+                      setStep(3);
+                    }}
+                    className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-mono font-bold text-xs flex items-center justify-center space-x-2 border border-slate-700 cursor-pointer"
+                  >
+                    <Wifi className="w-3.5 h-3.5" />
+                    <span>Enter Wi-Fi & Push to http://192.168.4.1</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -522,23 +583,33 @@ export const ProvisioningWizard: React.FC = () => {
           </div>
         )}
 
-        {/* STEP 3: CREDENTIAL INPUT & BLE PUSH */}
+        {/* STEP 3: CREDENTIAL INPUT & DUAL-CHANNEL PUSH */}
         {step === 3 && (
-          <form onSubmit={handleCompleteProvisioning} className="space-y-4">
+          <form onSubmit={bleDeviceHandle ? handleCompleteProvisioning : (e) => { e.preventDefault(); handleHttpProvisioning('192.168.4.1'); }} className="space-y-4">
             <div className="p-4 neu-inset rounded-2xl flex items-center space-x-3 mb-4">
-              <Smartphone className="w-5 h-5 text-cyan-400" />
+              {bleDeviceHandle ? <Smartphone className="w-5 h-5 text-cyan-400" /> : <Wifi className="w-5 h-5 text-amber-400" />}
               <div>
-                <p className="text-xs text-slate-400 font-mono">Hardware Target Connected (BLE)</p>
+                <p className="text-xs text-slate-400 font-mono">
+                  {bleDeviceHandle ? 'Hardware Target Connected (BLE)' : 'Hardware Target (Hotspot HTTP / 192.168.4.1)'}
+                </p>
                 <p className="text-sm font-extrabold font-mono">
                   {selectedDevice?.name} (<span className="text-cyan-400">{selectedDevice?.deviceUid}</span>)
                 </p>
               </div>
             </div>
 
+            {/* Wi-Fi 2.4GHz Important Note */}
+            <div className="p-3 bg-amber-950/40 border border-amber-800/40 rounded-xl text-amber-300 text-xs font-mono flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div>
+                <strong>IMPORTANT:</strong> ESP32 requires a <strong>2.4 GHz Wi-Fi</strong> network. Ensure your Wi-Fi network name and password are typed correctly (case-sensitive).
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5 font-mono">
-                  Home Wi-Fi Network Name (SSID)
+                  Home / Office Wi-Fi SSID (2.4GHz)
                 </label>
                 <div className="relative">
                   <Wifi className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
@@ -548,7 +619,7 @@ export const ProvisioningWizard: React.FC = () => {
                     value={wifiSsid}
                     onChange={(e) => setWifiSsid(e.target.value)}
                     className="w-full pl-10 neu-input font-mono"
-                    placeholder="e.g. Monk"
+                    placeholder="e.g. MyHomeWifi"
                   />
                 </div>
               </div>
@@ -565,26 +636,21 @@ export const ProvisioningWizard: React.FC = () => {
                     value={wifiPassword}
                     onChange={(e) => setWifiPassword(e.target.value)}
                     className="w-full pl-10 neu-input font-mono"
-                    placeholder="WPA2/WPA3 Password"
+                    placeholder="WPA2 / WPA3 Password"
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5 font-mono">
-                  Server Host IP (Broker & Gateway)
+                  MQTT Cloud Broker
                 </label>
                 <input
                   type="text"
-                  required
-                  value={serverHost}
-                  onChange={(e) => setServerHost(e.target.value)}
-                  className="w-full neu-input font-mono"
-                  placeholder="e.g. 192.168.1.100"
+                  readOnly
+                  value="broker.emqx.io (Port: 1883)"
+                  className="w-full neu-input font-mono text-slate-400 bg-slate-900/50"
                 />
-                <p className="text-[10px] text-amber-400/80 font-mono mt-1">
-                  💡 Use your PC's LAN IP (e.g. 192.168.1.50). Do not use 'localhost' as ESP32 cannot resolve localhost.
-                </p>
               </div>
 
               <div>
@@ -608,24 +674,40 @@ export const ProvisioningWizard: React.FC = () => {
               </div>
             )}
 
-            <div className="flex justify-between items-center pt-4 border-t border-slate-700/20">
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-700/20">
               <button
                 type="button"
                 disabled={provisioning}
-                onClick={() => setStep(2)}
-                className="neu-btn px-4 py-2 text-xs font-bold font-mono"
+                onClick={() => setStep(1)}
+                className="neu-btn px-4 py-2 text-xs font-bold font-mono w-full sm:w-auto"
               >
                 ← Back
               </button>
-              <button
-                type="submit"
-                disabled={provisioning || !wifiSsid}
-                className="neu-btn neu-btn-primary px-8 py-3 text-xs font-extrabold flex items-center space-x-2 disabled:opacity-50 cursor-pointer"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                <Bluetooth className={`w-4 h-4 ${provisioning ? 'animate-bounce' : ''}`} />
-                <span>{provisioning ? 'PUSHING OVER BLUETOOTH...' : 'PUSH CREDENTIALS TO HARDWARE (BLE)'}</span>
-              </button>
+
+              <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+                {bleDeviceHandle && (
+                  <button
+                    type="submit"
+                    disabled={provisioning || !wifiSsid}
+                    className="neu-btn neu-btn-primary px-6 py-3 text-xs font-extrabold flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer w-full sm:w-auto"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    <Bluetooth className={`w-4 h-4 ${provisioning ? 'animate-bounce' : ''}`} />
+                    <span>{provisioning ? 'PUSHING VIA BLUETOOTH...' : 'PUSH VIA BLUETOOTH (BLE)'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={provisioning || !wifiSsid}
+                  onClick={() => handleHttpProvisioning('192.168.4.1')}
+                  className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-amber-500/20 cursor-pointer w-full sm:w-auto"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  <Wifi className="w-4 h-4" />
+                  <span>PUSH VIA HOTSPOT (192.168.4.1)</span>
+                </button>
+              </div>
             </div>
           </form>
         )}
