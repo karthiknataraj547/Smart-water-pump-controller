@@ -743,7 +743,6 @@ void setPumpState(bool state, const char* initiator, const char* cmdId) {
     }
 
     publishHardwareAck(state ? "ON" : "OFF", initiator, cmdId);
-    sendHttpStateAck(state ? "ON" : "OFF", initiator, cmdId);
 
     // Immediate 0ms Telemetry Stream Update
     if (mqttClient.connected()) {
@@ -989,10 +988,7 @@ void TaskSafetyLoop(void *parameter) {
 // 10. FREERTOS NETWORKING & MQTT LOOP (Core 0)
 // =====================================================================
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-    // Visual telemetry activity flash on GPIO 2 LED
-    digitalWrite(PIN_LED_WIFI, LOW);
-    delay(30);
-    digitalWrite(PIN_LED_WIFI, HIGH);
+    digitalWrite(PIN_LED_WIFI, HIGH); // Visual telemetry activity indicator
 
     StaticJsonDocument<512> doc;
     DeserializationError error = deserializeJson(doc, payload, length);
@@ -1182,16 +1178,12 @@ void TaskNetworkLoop(void *parameter) {
                 }
             }
 
-            // Continuous Outbound HTTP REST Telemetry Sync (Every 2.5s)
-            if (millis() - lastHttpTelemetryTime > 2500) {
-                lastHttpTelemetryTime = millis();
-                sendHttpTelemetry();
-            }
+            // High-speed MQTT event processing loop
         } else {
             mqttConnected = false;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
 
@@ -1266,9 +1258,9 @@ void setup() {
         Serial.println("[ESP-NOW] Direct 2.4GHz Link Receiver Initialized & Armed!");
     }
 
-    // 8. FreeRTOS Dual-Core Tasks
+    // 8. FreeRTOS Dual-Core Tasks (High Priority Real-time Networking)
     xTaskCreatePinnedToCore(TaskSafetyLoop,  "TaskSafety",  4096, NULL, 5, &TaskSafetyHandle,  1); // Core 1 (Safety & Automation)
-    xTaskCreatePinnedToCore(TaskNetworkLoop, "TaskNetwork", 8192, NULL, 1, &TaskNetworkHandle, 0); // Core 0 (Networking & Cloud)
+    xTaskCreatePinnedToCore(TaskNetworkLoop, "TaskNetwork", 8192, NULL, 4, &TaskNetworkHandle, 0); // Core 0 (Priority 4 Real-time MQTT)
 }
 
 void loop() {
