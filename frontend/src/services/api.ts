@@ -19,6 +19,11 @@ export function getApiBaseUrl(): string {
       return `${protocol}//${host}:5000/api/v1`;
     }
 
+    // If hosted on Vercel or similar static hosting without backend proxy, return '' to use direct Cloud MQTT
+    if (host.includes('vercel.app') || host.includes('netlify.app') || host.includes('github.io')) {
+      return '';
+    }
+
     // If hosted on a cloud domain with backend proxy or same origin
     if (host && !host.includes('localhost')) {
       return `${window.location.origin}/api/v1`;

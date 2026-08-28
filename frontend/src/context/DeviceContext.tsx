@@ -68,6 +68,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   
   // Real-Time Heartbeat Tracker
   const [lastTelemetryTimestamp, setLastTelemetryTimestamp] = useState<number>(0);
+  const lastTelemetryTimestampRef = useRef<number>(0);
   const [nowTick, setNowTick] = useState<number>(Date.now());
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -122,15 +123,19 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ]);
 
       if (pStatus.status === 'fulfilled' && pStatus.value) {
-        // Protect recent user actions from being overwritten by stale polling
-        if (Date.now() - lastActionTimeRef.current >= 6000) {
+        // Protect active live MQTT stream and recent operator actions from being overwritten by stale REST polling
+        const isLiveTelemetryActive = (Date.now() - lastTelemetryTimestampRef.current < 8000);
+        if (!isLiveTelemetryActive && (Date.now() - lastActionTimeRef.current >= 6000)) {
           setPumpStatus(pStatus.value);
         }
       }
       if (aList.status === 'fulfilled' && aList.value) setAlerts(aList.value);
       if (rList.status === 'fulfilled' && rList.value) setRules(rList.value);
       if (sLatest.status === 'fulfilled' && sLatest.value) {
-        setTelemetry(prev => prev || sLatest.value);
+        const isLiveTelemetryActive = (Date.now() - lastTelemetryTimestampRef.current < 8000);
+        if (!isLiveTelemetryActive) {
+          setTelemetry(prev => prev || sLatest.value);
+        }
       }
     } catch (err) {
       console.warn('[DeviceContext] Error loading device details:', err);
@@ -186,12 +191,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         client.on('connect', () => {
           console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to AquaControl topics...');
           setMqttConnected(true);
-          client.subscribe('aquacontrol/WPC-A81F29/#');
-          client.subscribe('aquacontrol/v1/devices/WPC-A81F29/#');
-          client.subscribe('devices/WPC-A81F29/#');
-          client.subscribe('devices/+/telemetry');
-          client.subscribe('devices/+/ack');
-          client.subscribe('devices/+/status');
+          // Subscribe specifically without overlapping wildcards to avoid duplicates
+          client.subscribe('devices/WPC-A81F29/telemetry');
+          client.subscribe('devices/WPC-A81F29/ack');
+          client.subscribe('devices/WPC-A81F29/status');
+          client.subscribe('aquacontrol/WPC-A81F29/telemetry');
+          client.subscribe('aquacontrol/WPC-A81F29/ack');
+          client.subscribe('aquacontrol/WPC-A81F29/status');
           client.subscribe('aquacontrol/telemetry');
           client.subscribe('aquacontrol/status');
           client.subscribe('aquacontrol/ack');
@@ -200,6 +206,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         client.on('message', (topic: string, message: Buffer) => {
           try {
             const payloadStr = message.toString();
+            if (!payloadStr || payloadStr.trim().length === 0) return;
             const data = JSON.parse(payloadStr);
 
             // STRICT FILTER: Discard public messages from other strangers' devices
@@ -245,6 +252,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             if (subTopic === 'telemetry' || data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
               const now = Date.now();
+              lastTelemetryTimestampRef.current = now;
               setLastTelemetryTimestamp(now);
               setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
               setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
@@ -269,26 +277,36 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 sensor_status: status,
                 created_at: new Date(now).toISOString()
               });
+
               if (typeof data.pump_running === 'boolean' || data.pump_state) {
-                const isRunning = data.pump_running === true || data.pump_state === 'ON';
+                const isRunning = data.pump_running === true || data.pump_state === 'ON' || String(data.pump_state).toUpperCase() === 'ON';
+                const hwAmps = Number(data.current_amps ?? (isRunning ? 4.8 : 0.0));
+                const hwRuntime = Number(data.runtime_seconds ?? 0);
+                const hwMode = (data.pump_mode || 'AUTOMATIC') as any;
+                const hwState: PumpState = isRunning ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
+
                 setPumpStatus(prev => {
-                  const newState: PumpState = isRunning ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
-                  if (prev?.pump_state === 'STARTING' && !isRunning) {
+                  // If operator just clicked Start and is in STARTING state, give hardware 3 seconds before accepting an OFF state
+                  if (prev?.pump_state === 'STARTING' && !isRunning && Date.now() - lastActionTimeRef.current < 4000) {
+                    return prev;
+                  }
+                  // If operator just clicked Stop and is in STOPPING state, give hardware 3 seconds before accepting an ON state
+                  if (prev?.pump_state === 'STOPPING' && isRunning && Date.now() - lastActionTimeRef.current < 4000) {
                     return prev;
                   }
                   return {
                     ...(prev || {
                       id: 'ps_live',
                       device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                      mode: data.pump_mode || 'AUTOMATIC',
+                      mode: hwMode,
                       runtime_seconds: 0,
                       changed_at: new Date().toISOString(),
                       changed_by: 'HARDWARE_TELEMETRY'
                     }),
-                    pump_state: newState,
-                    mode: (data.pump_mode || prev?.mode || 'AUTOMATIC') as any,
-                    current_draw_amps: Number(data.current_amps ?? (isRunning ? 4.8 : 0.0)),
-                    runtime_seconds: Number(data.runtime_seconds ?? prev?.runtime_seconds ?? 0)
+                    pump_state: hwState,
+                    mode: hwMode,
+                    current_draw_amps: hwAmps,
+                    runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
                   };
                 });
 
@@ -297,7 +315,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 }
               }
             } else if (subTopic === 'ack') {
-              const confirmedState: PumpState = data.confirmed_state === 'ON' ? 'ON' : (data.confirmed_state === 'EMERGENCY_STOP' ? 'FAULT' : 'OFF');
+              const isHwOn = data.confirmed_state === 'ON' || data.pump_state === 'ON' || data.state === 'ON';
+              const isHwFault = data.confirmed_state === 'FAULT' || data.confirmed_state === 'EMERGENCY_STOP' || data.pump_state === 'FAULT';
+              const confirmedState: PumpState = isHwOn ? 'ON' : (isHwFault ? 'FAULT' : 'OFF');
+              const hwAmps = Number(data.current_amps ?? (confirmedState === 'ON' ? 4.8 : 0.0));
+              const hwRuntime = Number(data.runtime_seconds ?? 0);
+
               setPumpStatus(prev => ({
                 ...(prev || {
                   id: 'ps_live',
@@ -308,8 +331,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   changed_by: 'HARDWARE_ACK'
                 }),
                 pump_state: confirmedState,
-                current_draw_amps: Number(data.current_amps ?? (confirmedState === 'ON' ? 4.8 : 0.0)),
-                runtime_seconds: Number(data.runtime_seconds ?? prev?.runtime_seconds ?? 0)
+                mode: (data.pump_mode || prev?.mode || 'AUTOMATIC') as any,
+                current_draw_amps: hwAmps,
+                runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
               }));
               setCommandPending(false);
               setCommandStatusText(`Hardware Verified: Pump is ${confirmedState} ✓`);
@@ -317,11 +341,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             } else if (subTopic === 'status') {
               const isOnline = data.status === 'online';
               if (isOnline) {
-                setLastTelemetryTimestamp(Date.now());
+                const now = Date.now();
+                lastTelemetryTimestampRef.current = now;
+                setLastTelemetryTimestamp(now);
                 setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
                 setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
                 if (data.pump_state) {
-                  const hwState: PumpState = data.pump_state === 'ON' ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
+                  const isRunning = data.pump_state === 'ON' || data.pump_running === true;
+                  const hwState: PumpState = isRunning ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
                   setPumpStatus(prev => prev ? { ...prev, pump_state: hwState } : null);
                 }
               } else {

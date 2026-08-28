@@ -744,6 +744,34 @@ void setPumpState(bool state, const char* initiator, const char* cmdId) {
 
     publishHardwareAck(state ? "ON" : "OFF", initiator, cmdId);
     sendHttpStateAck(state ? "ON" : "OFF", initiator, cmdId);
+
+    // Immediate 0ms Telemetry Stream Update
+    if (mqttClient.connected()) {
+        StaticJsonDocument<512> doc;
+        doc["device_uid"] = DEVICE_UID;
+        doc["timestamp"] = millis() / 1000;
+        doc["water_level_percentage"] = latestTankData.water_level_pct;
+        doc["water_level_pct"] = latestTankData.water_level_pct;
+        doc["water_level_liters"] = latestTankData.water_liters;
+        doc["flow_rate_lpm"] = latestTankData.flow_rate_lpm;
+        doc["inflow_rate_lpm"] = latestTankData.flow_rate_lpm;
+        doc["total_inflow_liters"] = latestTankData.total_inflow_l;
+        doc["tds_ppm"] = latestTankData.tds_ppm;
+        doc["temperature_c"] = latestTankData.temperature_c;
+        doc["pump_running"] = state;
+        doc["pump_state"] = state ? "ON" : "OFF";
+        doc["pump_mode"] = pumpMode;
+        doc["current_amps"] = state ? (currentAmps > 0.0f ? currentAmps : 4.8f) : 0.0f;
+        doc["runtime_seconds"] = totalRuntimeSeconds;
+        doc["subnode_online"] = subNodeConnected;
+        doc["rssi"] = WiFi.RSSI();
+        doc["uptime_seconds"] = millis() / 1000;
+
+        char buffer[512];
+        serializeJson(doc, buffer);
+        mqttClient.publish((String("devices/") + DEVICE_UID + "/telemetry").c_str(), buffer);
+        mqttClient.publish((String("aquacontrol/") + DEVICE_UID + "/telemetry").c_str(), buffer);
+    }
 }
 
 void triggerEmergencyStop(const char* reason, const char* cmdId) {
@@ -786,9 +814,9 @@ void publishHardwareAck(const char* state, const char* initiator, const char* cm
     String topic1 = String("devices/") + DEVICE_UID + "/ack";
     String topic2 = String("aquacontrol/") + DEVICE_UID + "/ack";
     String topic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/ack";
-    mqttClient.publish(topic1.c_str(), buffer, true);
-    mqttClient.publish(topic2.c_str(), buffer, true);
-    mqttClient.publish(topic3.c_str(), buffer, true);
+    mqttClient.publish(topic1.c_str(), buffer, false); // Do NOT retain ACKs
+    mqttClient.publish(topic2.c_str(), buffer, false); // Do NOT retain ACKs
+    mqttClient.publish(topic3.c_str(), buffer, false); // Do NOT retain ACKs
     Serial.printf("[MQTT ACK] Published confirmation: %s\n", buffer);
 }
 
