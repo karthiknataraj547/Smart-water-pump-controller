@@ -203,6 +203,23 @@ export class MqttBridge {
       console.log(`[MQTT] Cloud published command to ${topic1}, ${topic2}, ${topic3}:`, command);
     }
   }
+
+  public syncDeviceRules(deviceUid: string, rules: any[]): void {
+    const command = {
+      command: 'SYNC_RULES',
+      cmd_id: `sync_${Date.now()}`,
+      rules: rules.map(r => ({
+        id: r.id,
+        rule_name: r.rule_name,
+        enabled: Boolean(r.enabled),
+        priority: r.priority || 1,
+        condition_json: typeof r.condition_json === 'string' ? JSON.parse(r.condition_json) : (r.condition_json || {}),
+        action_json: typeof r.action_json === 'string' ? JSON.parse(r.action_json) : (r.action_json || {})
+      }))
+    };
+    this.publishCommand(deviceUid, command);
+    console.log(`[MQTT] Pushed ${rules.length} autonomous rules to hardware ${deviceUid} over MQTT.`);
+  }
 }
 
 export const mqttBridge = MqttBridge.getInstance();

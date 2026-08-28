@@ -17,10 +17,13 @@ interface DeviceContextType {
   isDeviceOnline: boolean;
   isSubnodeOnline: boolean;
   subnodeError: string | null;
+  isWaterLevelSensorOnline: boolean;
+  waterLevelSensorError: string | null;
   commandPending: boolean;
   commandStatusText: string;
   refreshDevices: () => Promise<void>;
   refreshRules: () => Promise<void>;
+  syncRulesToHardware: (rulesList?: AutomationRule[]) => Promise<void>;
   reconnectWs: () => Promise<void>;
   startPump: () => Promise<void>;
   stopPump: () => Promise<void>;
@@ -68,10 +71,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [commandPending, setCommandPending] = useState<boolean>(false);
   const [commandStatusText, setCommandStatusText] = useState<string>('');
   
-  // Real-Time Heartbeat Tracker
+  // Real-Time Heartbeat & Sensor Health Tracker
   const [isDeviceOnline, setIsDeviceOnline] = useState<boolean>(false);
   const [isSubnodeOnline, setIsSubnodeOnline] = useState<boolean>(true);
   const [subnodeError, setSubnodeError] = useState<string | null>(null);
+  const [isWaterLevelSensorOnline, setIsWaterLevelSensorOnline] = useState<boolean>(true);
+  const [waterLevelSensorError, setWaterLevelSensorError] = useState<string | null>(null);
   const lastTelemetryTimestampRef = useRef<number>(0);
   const lastSubnodeTimestampRef = useRef<number>(Date.now());
 
@@ -262,11 +267,42 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const isSubOnline = data.subnode_online !== undefined ? Boolean(data.subnode_online) : 
                                   (data.subNodeOnline !== undefined ? Boolean(data.subNodeOnline) : true);
               setIsSubnodeOnline(isSubOnline);
+
+              // Granular Water Level Sensor Probe Fault Detection
+              const isUltrasonicFault = Boolean(data.water_level_fault) || 
+                                        (data.ultrasonic_online === false) ||
+                                        (data.sensor_status === 'ULTRASONIC_FAULT') || 
+                                        (data.water_level_pct < 0);
+              const isLevelOk = isSubOnline && !isUltrasonicFault;
+              setIsWaterLevelSensorOnline(isLevelOk);
+
               if (isSubOnline) {
                 lastSubnodeTimestampRef.current = now;
                 setSubnodeError(null);
+
+                if (isUltrasonicFault) {
+                  setWaterLevelSensorError('Water Level Sensor Fault: Ultrasonic probe (JSN-SR04T) disconnected or not responding');
+                  setAlerts(prev => {
+                    if (prev.some(a => a.id === 'alert_ultrasonic_fault' && !a.acknowledged)) return prev;
+                    return [
+                      {
+                        id: 'alert_ultrasonic_fault',
+                        device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                        severity: 'warning',
+                        title: 'WATER LEVEL SENSOR HARDWARE FAULT',
+                        message: 'Sub-Node (ESP8266) is communicating via ESP-NOW, but the ultrasonic level probe (JSN-SR04T) is unplugged or returning invalid echoes.',
+                        acknowledged: false,
+                        created_at: new Date().toISOString()
+                      },
+                      ...prev
+                    ];
+                  });
+                } else {
+                  setWaterLevelSensorError(null);
+                }
               } else {
                 setSubnodeError('Tank Sub-Node Disconnected (ESP-NOW RF Link Lost)');
+                setWaterLevelSensorError('Sensor Unreachable (Sub-Node Disconnected)');
                 setAlerts(prev => {
                   if (prev.some(a => a.id === 'alert_subnode_lost' && !a.acknowledged)) return prev;
                   return [
@@ -284,13 +320,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 });
               }
 
-              const waterPct = Number(data.water_level_percentage ?? data.water_level_pct ?? data.waterLevelPercentage ?? 0);
-              const waterLiters = Number(data.water_level_liters ?? data.waterLevelLiters ?? (waterPct * 20));
-              const flowRate = Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? data.inflowRateLpm ?? 0);
-              const totalLiters = Number(data.total_inflow_liters ?? data.total_inflow_l ?? data.totalInflowLiters ?? 0);
-              const tds = Number(data.tds_ppm ?? data.tdsPpm ?? 0);
-              const temp = Number(data.temperature_c ?? data.temperatureC ?? 25);
-              const status = data.sensor_status || data.sensorStatus || (isSubOnline ? 'HEALTHY' : 'SUBNODE_DISCONNECTED');
+              const rawPct = Number(data.water_level_percentage ?? data.water_level_pct ?? data.waterLevelPercentage ?? 0);
+              const waterPct = isLevelOk ? Math.max(0, rawPct) : 0;
+              const waterLiters = isLevelOk ? Number(data.water_level_liters ?? data.waterLevelLiters ?? (waterPct * 20)) : 0;
+              const flowRate = isSubOnline ? Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? data.inflowRateLpm ?? 0) : 0;
+              const totalLiters = isSubOnline ? Number(data.total_inflow_liters ?? data.total_inflow_l ?? data.totalInflowLiters ?? 0) : 0;
+              const tds = isSubOnline ? Number(data.tds_ppm ?? data.tdsPpm ?? 0) : 0;
+              const temp = isSubOnline ? Number(data.temperature_c ?? data.temperatureC ?? 25) : 0;
+              const status = !isSubOnline ? 'SUBNODE_DISCONNECTED' : (isUltrasonicFault ? 'ULTRASONIC_FAULT' : (data.sensor_status || 'HEALTHY'));
 
               setTelemetry({
                 id: `tel_${now}`,
@@ -683,6 +720,22 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const syncRulesToHardware = useCallback(async (rulesList?: AutomationRule[]) => {
+    const activeRules = rulesList || rules;
+    const devUid = selectedDevice?.device_uid || 'WPC-A81F29';
+    publishDirectMqttCommand('SYNC_RULES', 'SYNC_RULES', {
+      rules: activeRules.map(r => ({
+        id: r.id,
+        rule_name: r.rule_name,
+        enabled: Boolean(r.enabled),
+        priority: r.priority || 1,
+        condition_json: typeof r.condition_json === 'string' ? JSON.parse(r.condition_json) : (r.condition_json || {}),
+        action_json: typeof r.action_json === 'string' ? JSON.parse(r.action_json) : (r.action_json || {})
+      }))
+    });
+    console.log('[DeviceContext] Direct MQTT Sync Rules sent to hardware:', activeRules.length, 'rules');
+  }, [rules, selectedDevice, publishDirectMqttCommand]);
+
   return (
     <DeviceContext.Provider
       value={{
@@ -698,10 +751,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isDeviceOnline,
         isSubnodeOnline,
         subnodeError,
+        isWaterLevelSensorOnline,
+        waterLevelSensorError,
         commandPending,
         commandStatusText,
         refreshDevices,
         refreshRules,
+        syncRulesToHardware,
         reconnectWs: async () => { connectWs(); },
         startPump,
         stopPump,

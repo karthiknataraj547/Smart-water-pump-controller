@@ -235,6 +235,7 @@ void loop() {
         float distanceCm = getMedianDistance();
         float levelPercentage = 0.0;
         float waterLiters = 0.0;
+        uint8_t sensorHealth = 0x0E; // Bit 0: Ultrasonic, Bit 1: Flow, Bit 2: TDS, Bit 3: RF
 
         if (distanceCm > 0.0) {
             float effectiveDepth = TANK_HEIGHT_CM - TANK_SENSOR_OFFSET;
@@ -243,10 +244,12 @@ void loop() {
             if (levelPercentage > 100.0) levelPercentage = 100.0;
             if (levelPercentage < 0.0) levelPercentage = 0.0;
             waterLiters = (levelPercentage / 100.0) * TANK_CAPACITY_LITERS;
+            sensorHealth |= 0x01; // Ultrasonic Health OK
         } else {
-            // Strict Zero: If sensor is not returning data or unplugged, report exactly 0.0
-            levelPercentage = 0.0f;
+            // Strict Fault: Ultrasonic probe disconnected or no echo
+            levelPercentage = -1.0f;
             waterLiters = 0.0f;
+            sensorHealth &= ~0x01; // Ultrasonic Fault
         }
 
         // Sample TDS
@@ -263,7 +266,7 @@ void loop() {
         packet.total_inflow_l = totalLiters;
         packet.tds_ppm = tdsPpm;
         packet.temperature_c = 24.5;
-        packet.sensor_health = (distanceCm > 0.0) ? 0x0F : 0x07; // Health mask
+        packet.sensor_health = sensorHealth;
         packet.battery_mv = 3300;
 
         // Calculate CRC16-CCITT Checksum over the first 33 bytes

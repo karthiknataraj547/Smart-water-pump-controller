@@ -3,6 +3,25 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database/db';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { AutomationRule, Device } from '../types';
+import { mqttBridge } from '../services/MqttBridge';
+
+async function pushRulesToHardware(targetDeviceId: string): Promise<void> {
+  try {
+    const device = await db.queryOne<Device>('SELECT id, device_uid FROM devices WHERE id = ? OR device_uid = ?', [targetDeviceId, targetDeviceId]);
+    const deviceUid = device ? device.device_uid : (targetDeviceId || 'WPC-A81F29');
+    const dbDeviceId = device ? device.id : targetDeviceId;
+
+    const rules = await db.query<AutomationRule>(
+      'SELECT * FROM automation_rules WHERE device_id = ? OR device_id = ? ORDER BY priority ASC, created_at ASC',
+      [dbDeviceId, deviceUid]
+    );
+
+    mqttBridge.syncDeviceRules(deviceUid, rules);
+    console.log(`[Automation API] Synced ${rules.length} rules to hardware device ${deviceUid}`);
+  } catch (err: any) {
+    console.warn('[Automation API] Could not push rules to hardware:', err.message);
+  }
+}
 
 export async function getRules(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
@@ -63,6 +82,9 @@ export async function createRule(req: AuthenticatedRequest, res: Response): Prom
         priority || 1
       ]
     );
+
+    await pushRulesToHardware(targetDeviceId);
+
     res.status(201).json({ success: true, data: { id: ruleId, rule_name, enabled: enabled !== false, device_id: targetDeviceId } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
@@ -78,6 +100,9 @@ export async function toggleRule(req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
+    const rule = await db.queryOne<AutomationRule>('SELECT device_id FROM automation_rules WHERE id = ?', [ruleId]);
+    const targetDevId = rule ? rule.device_id : (req.params.deviceId || '97511f3d-e3b7-4b75-876f-b11b259f86d5');
+
     const isEnabled = enabled === true || enabled === 1 || enabled === 'true';
     await db.execute(
       'UPDATE automation_rules SET enabled = ? WHERE id = ?',
@@ -85,6 +110,8 @@ export async function toggleRule(req: AuthenticatedRequest, res: Response): Prom
     );
 
     console.log(`[Automation API] Rule ${ruleId} toggled to: ${isEnabled ? 'ENABLED' : 'DISABLED'}`);
+    await pushRulesToHardware(targetDevId);
+
     res.json({ success: true, message: `Rule ${isEnabled ? 'enabled' : 'disabled'}`, enabled: isEnabled });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
@@ -99,8 +126,13 @@ export async function deleteRule(req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
+    const rule = await db.queryOne<AutomationRule>('SELECT device_id FROM automation_rules WHERE id = ?', [ruleId]);
+    const targetDevId = rule ? rule.device_id : (req.params.deviceId || '97511f3d-e3b7-4b75-876f-b11b259f86d5');
+
     await db.execute('DELETE FROM automation_rules WHERE id = ?', [ruleId]);
     console.log(`[Automation API] Rule ${ruleId} deleted successfully.`);
+    await pushRulesToHardware(targetDevId);
+
     res.json({ success: true, message: 'Rule deleted successfully', ruleId });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });

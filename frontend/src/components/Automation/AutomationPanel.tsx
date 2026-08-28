@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useDevice } from '../../context/DeviceContext';
 import { ApiService } from '../../services/api';
-import { Settings, Plus, ToggleLeft, ToggleRight, Trash2, Sliders } from 'lucide-react';
+import { Settings, Plus, ToggleLeft, ToggleRight, Trash2, Sliders, Cpu, CheckCircle2 } from 'lucide-react';
 
 export const AutomationPanel: React.FC = () => {
-  const { rules, selectedDevice, refreshRules } = useDevice();
+  const { rules, selectedDevice, refreshRules, syncRulesToHardware } = useDevice();
   const [localRules, setLocalRules] = useState(rules);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newRuleName, setNewRuleName] = useState('');
@@ -19,24 +19,34 @@ export const AutomationPanel: React.FC = () => {
   const handleToggle = async (ruleId: string, currentEnabled: boolean) => {
     const devId = selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5';
     const nextState = !currentEnabled;
-    setLocalRules(prev => prev.map(r => r.id === ruleId ? { ...r, enabled: nextState } : r));
+    const updated = localRules.map(r => r.id === ruleId ? { ...r, enabled: nextState } : r);
+    setLocalRules(updated);
+    
+    // Immediate Direct MQTT Hardware Sync
+    syncRulesToHardware(updated);
+
     try {
       await ApiService.toggleAutomationRule(devId, ruleId, nextState);
       await refreshRules();
     } catch (err: any) {
-      console.warn('[Automation] Error toggling rule, preserving local state:', err.message);
+      console.warn('[Automation] Error toggling rule in backend, hardware updated:', err.message);
     }
   };
 
   const handleDelete = async (ruleId: string) => {
     const devId = selectedDevice?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5';
     if (!confirm('Are you sure you want to delete this automation rule?')) return;
-    setLocalRules(prev => prev.filter(r => r.id !== ruleId));
+    const updated = localRules.filter(r => r.id !== ruleId);
+    setLocalRules(updated);
+
+    // Immediate Direct MQTT Hardware Sync
+    syncRulesToHardware(updated);
+
     try {
       await ApiService.deleteAutomationRule(devId, ruleId);
       await refreshRules();
     } catch (err: any) {
-      console.warn('[Automation] Error deleting rule, preserving local state:', err.message);
+      console.warn('[Automation] Error deleting rule in backend, hardware updated:', err.message);
     }
   };
 
@@ -53,6 +63,20 @@ export const AutomationPanel: React.FC = () => {
       generate_alert: true,
       alert_title: `Automation: ${newRuleName}`
     };
+
+    const tempRule: any = {
+      id: `rule_${Date.now()}`,
+      device_id: selectedDevice.id,
+      rule_name: newRuleName,
+      condition_json: condition,
+      action_json: action,
+      enabled: true,
+      priority: 2
+    };
+
+    const updated = [...localRules, tempRule];
+    setLocalRules(updated);
+    syncRulesToHardware(updated);
 
     try {
       await ApiService.createAutomationRule(selectedDevice.id, {
@@ -72,15 +96,21 @@ export const AutomationPanel: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold flex items-center space-x-2" style={{ fontFamily: 'var(--font-display)' }}>
             <Sliders className="w-5 h-5 text-cyan-400" />
             <span>AUTONOMOUS EDGE RULES & SAFETY POLICIES</span>
           </h2>
-          <p className="text-xs text-slate-400 font-mono mt-1">
-            Rules execute locally on the ESP32 FreeRTOS automation task even during cloud outages.
-          </p>
+          <div className="flex items-center space-x-2 mt-1">
+            <span className="text-xs text-slate-400 font-mono">
+              Rules execute strictly on ESP32 FreeRTOS hardware task and Cloud Automation Engine.
+            </span>
+            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950/80 text-cyan-400 border border-cyan-500/30">
+              <Cpu className="w-3 h-3" />
+              <span>EDGE FIRMWARE SYNC ACTIVE</span>
+            </span>
+          </div>
         </div>
 
         <button

@@ -16,7 +16,16 @@ import { Cpu, UploadCloud } from 'lucide-react';
 import { ApiService } from './services/api';
 
 export const UserApp: React.FC = () => {
-  const { selectedDevice, pumpStatus, telemetry, alerts, isDeviceOnline, isSubnodeOnline } = useDevice();
+  const { 
+    selectedDevice, 
+    pumpStatus, 
+    telemetry, 
+    alerts, 
+    isDeviceOnline, 
+    isSubnodeOnline, 
+    isWaterLevelSensorOnline,
+    waterLevelSensorError 
+  } = useDevice();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -24,10 +33,10 @@ export const UserApp: React.FC = () => {
   const [otaStatus, setOtaStatus] = useState<string>('');
 
   const isRunning = isDeviceOnline && (pumpStatus?.pump_state === 'ON' || pumpStatus?.pump_state === 'STARTING');
-  const isSubnodeHealthy = isDeviceOnline && isSubnodeOnline;
-  const waterPct = isSubnodeHealthy ? Number(telemetry?.water_level_percentage ?? 0) : 0;
-  const volumeLiters = isSubnodeHealthy ? Number(telemetry?.water_level_liters ?? (waterPct * 20)) : 0;
-  const inflowRate = isSubnodeHealthy ? Number(telemetry?.inflow_rate_lpm ?? 0) : 0;
+  const isLevelValid = isDeviceOnline && isSubnodeOnline && isWaterLevelSensorOnline;
+  const waterPct = isLevelValid ? Number(telemetry?.water_level_percentage ?? 0) : 0;
+  const volumeLiters = isLevelValid ? Number(telemetry?.water_level_liters ?? (waterPct * 20)) : 0;
+  const inflowRate = (isDeviceOnline && isSubnodeOnline) ? Number(telemetry?.inflow_rate_lpm ?? 0) : 0;
   const unackAlerts = alerts.filter(a => !a.acknowledged).length;
 
   const triggerOtaUpdate = async () => {
@@ -112,6 +121,8 @@ export const UserApp: React.FC = () => {
                       inflowRateLpm={inflowRate}
                       isPumpRunning={isRunning}
                       isSubnodeOnline={isSubnodeOnline}
+                      isWaterLevelSensorOnline={isWaterLevelSensorOnline}
+                      waterLevelSensorError={waterLevelSensorError}
                       isDeviceOnline={isDeviceOnline}
                     />
                   </div>
@@ -169,32 +180,35 @@ export const UserApp: React.FC = () => {
                       <span className="font-bold text-cyan-400">ESP-NOW 2.4GHz RF (CRC16)</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Opto-Isolated Pilot Relay:</span>
-                      <span className="font-bold text-emerald-400">Active LOW Interlock Armed</span>
+                      <span className="text-slate-400">Motor Load Status:</span>
+                      <span className="font-bold text-emerald-400">{isRunning ? `${pumpStatus?.current_draw_amps?.toFixed(1) || '4.8'} A` : '0.0 A'}</span>
                     </div>
                   </div>
+                  <p className="text-xs text-slate-400 font-mono leading-relaxed mt-2">
+                    ACS712 Current Sensor calibrated. Overcurrent protection set at 15.0A, Dry Run protection at zero flow &gt; 120s.
+                  </p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB 2: DEDICATED PUMP CONTROLLER */}
+          {/* TAB 2: PUMP CONTROL ROOM */}
           {activeTab === 'pump_control' && (
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-3xl mx-auto space-y-6">
               <PumpControlCard />
             </div>
           )}
 
-          {/* TAB 3: WATER TANK VISUALIZATION */}
+          {/* TAB 3: TANK DYNAMICS VIEW */}
           {activeTab === 'tank_monitor' && (
-            <div className="max-w-3xl mx-auto neu-card p-8 rounded-3xl space-y-6">
+            <div className="max-w-3xl mx-auto neu-card p-6 sm:p-8 rounded-3xl space-y-6">
               <div className="flex items-center justify-between pb-4 border-b border-slate-700/20">
                 <div>
-                  <h2 className="text-lg font-bold uppercase tracking-wide" style={{ fontFamily: 'var(--font-display)' }}>
-                    OVERHEAD RESERVOIR HYDRODYNAMIC MODEL
+                  <h2 className="text-xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
+                    OVERHEAD WATER TANK 3D WAVE MONITOR
                   </h2>
-                  <p className="text-xs text-slate-400 font-mono">
-                    Real-time sinus liquid waveform calculations & volumetric sensor interpolation
+                  <p className="text-xs text-slate-400 font-mono mt-1">
+                    Continuous ultrasonic echo sampling with 5-stage median filtering.
                   </p>
                 </div>
                 <span className="text-xs font-mono text-cyan-400 font-bold px-3 py-1 rounded-full neu-inset">
@@ -209,6 +223,10 @@ export const UserApp: React.FC = () => {
                   maxCapacityLiters={selectedDevice?.tank_capacity_liters || 2000}
                   inflowRateLpm={inflowRate}
                   isPumpRunning={isRunning}
+                  isSubnodeOnline={isSubnodeOnline}
+                  isWaterLevelSensorOnline={isWaterLevelSensorOnline}
+                  waterLevelSensorError={waterLevelSensorError}
+                  isDeviceOnline={isDeviceOnline}
                 />
               </div>
             </div>

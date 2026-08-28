@@ -75,8 +75,13 @@ export class TelemetryService {
       });
     }
 
+    // Sub-node and ultrasonic sensor health detection
+    const subnodeOnline = (payload as any).subnode_online !== undefined ? Boolean((payload as any).subnode_online) : true;
+    const waterLevelFault = Boolean((payload as any).water_level_fault);
+    const ultrasonicOnline = (payload as any).ultrasonic_online !== undefined ? Boolean((payload as any).ultrasonic_online) : (subnodeOnline && !waterLevelFault);
+    const activeRulesCount = Number((payload as any).active_rules_count || 0);
+
     // Update Sub Node if provided
-    let subnodeOnline = true;
     if (payload.node_uid) {
       const subnode = await db.queryOne<DeviceNode>(
         'SELECT * FROM device_nodes WHERE node_uid = ? AND main_device_id = ?',
@@ -92,7 +97,7 @@ export class TelemetryService {
       }
     }
 
-    // Broadcast live 200ms telemetry to all connected clients (Web, Mobile, Windows Projector)
+    // Broadcast live 100ms telemetry to all connected clients (Web, Mobile, Windows Projector)
     const telemetryBroadcast = {
       readingId,
       deviceUid: device.device_uid,
@@ -103,7 +108,11 @@ export class TelemetryService {
       totalInflowLiters: totalInflow,
       tdsPpm,
       temperatureC: tempC,
-      sensorStatus,
+      sensorStatus: (payload as any).sensor_status || sensorStatus,
+      subnodeOnline,
+      ultrasonicOnline,
+      waterLevelFault,
+      activeRulesCount,
       pumpState: rawPumpState || 'OFF',
       pumpRunning: rawPumpState === 'ON',
       currentAmps: Number(payload.current_amps ?? (rawPumpState === 'ON' ? 4.8 : 0.0)),
@@ -119,7 +128,9 @@ export class TelemetryService {
     await automationEngine.evaluateRules(device.id, {
       water_level_pct: waterLevelPct,
       flow_rate_lpm: flowRate,
-      subnode_online: subnodeOnline
+      subnode_online: subnodeOnline,
+      water_level_fault: waterLevelFault,
+      sensor_status: (payload as any).sensor_status || sensorStatus
     });
   }
 

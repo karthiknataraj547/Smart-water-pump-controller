@@ -114,6 +114,23 @@ typedef struct __attribute__((packed)) {
     uint16_t crc16;
 } TankTelemetryPacket;
 
+// Dynamic Autonomous Rule Structure (Synchronized from Cloud & Frontend)
+struct DynamicRule {
+    char id[37];
+    char rule_name[64];
+    bool enabled;
+    float level_lt; // -1 if not set
+    float level_gt; // -1 if not set
+    uint16_t no_flow_sec; // 0 if not set
+    char action[16]; // "START", "STOP", "EMERGENCY_STOP"
+    uint8_t priority;
+};
+
+#define MAX_DYNAMIC_RULES 12
+DynamicRule dynamicRules[MAX_DYNAMIC_RULES];
+uint8_t dynamicRuleCount = 0;
+bool waterLevelSensorFault = false;
+
 // =====================================================================
 // GLOBAL OBJECTS & STATE
 // =====================================================================
@@ -160,6 +177,8 @@ bool bleConnected = false;
 
 // Forward Declarations
 void loadSavedCredentials();
+void loadSavedRules();
+void saveRulesToNvs();
 void saveCredentials(const String& ssid, const String& pass, const String& broker, int mPort, const String& host, int aPort, const String& auth);
 void handleApplyCredentials(const String& jsonString);
 void startBleProvisioning();
@@ -173,8 +192,88 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length);
 uint16_t calculateCrc16(const uint8_t *data, size_t length);
 
 // =====================================================================
-// 1. NVS FLASH CREDENTIAL STORAGE
+// 1. NVS FLASH CREDENTIAL & RULES STORAGE
 // =====================================================================
+void loadSavedRules() {
+    preferences.begin("pump_rules", true);
+    dynamicRuleCount = preferences.getUInt("rule_cnt", 0);
+    if (dynamicRuleCount > MAX_DYNAMIC_RULES) dynamicRuleCount = 0;
+    
+    for (uint8_t i = 0; i < dynamicRuleCount; i++) {
+        char keyPrefix[16];
+        snprintf(keyPrefix, sizeof(keyPrefix), "r_%d_", i);
+        
+        String rId = preferences.getString((String(keyPrefix) + "id").c_str(), "");
+        String rName = preferences.getString((String(keyPrefix) + "name").c_str(), "");
+        String rAct = preferences.getString((String(keyPrefix) + "act").c_str(), "START");
+        
+        strncpy(dynamicRules[i].id, rId.c_str(), sizeof(dynamicRules[i].id) - 1);
+        strncpy(dynamicRules[i].rule_name, rName.c_str(), sizeof(dynamicRules[i].rule_name) - 1);
+        strncpy(dynamicRules[i].action, rAct.c_str(), sizeof(dynamicRules[i].action) - 1);
+        
+        dynamicRules[i].enabled = preferences.getBool((String(keyPrefix) + "en").c_str(), true);
+        dynamicRules[i].level_lt = preferences.getFloat((String(keyPrefix) + "lt").c_str(), -1.0f);
+        dynamicRules[i].level_gt = preferences.getFloat((String(keyPrefix) + "gt").c_str(), -1.0f);
+        dynamicRules[i].no_flow_sec = preferences.getUInt((String(keyPrefix) + "nf").c_str(), 0);
+        dynamicRules[i].priority = preferences.getUInt((String(keyPrefix) + "pr").c_str(), 1);
+    }
+    preferences.end();
+    
+    // Default fallback rules if no custom rules configured yet
+    if (dynamicRuleCount == 0) {
+        dynamicRuleCount = 3;
+        
+        strncpy(dynamicRules[0].id, "rule_default_start", 36);
+        strncpy(dynamicRules[0].rule_name, "Low Level Refill (Start < 30%)", 63);
+        strncpy(dynamicRules[0].action, "START", 15);
+        dynamicRules[0].enabled = true;
+        dynamicRules[0].level_lt = 30.0f;
+        dynamicRules[0].level_gt = -1.0f;
+        dynamicRules[0].no_flow_sec = 0;
+        dynamicRules[0].priority = 1;
+        
+        strncpy(dynamicRules[1].id, "rule_default_stop", 36);
+        strncpy(dynamicRules[1].rule_name, "High Level Cutoff (Stop >= 95%)", 63);
+        strncpy(dynamicRules[1].action, "STOP", 15);
+        dynamicRules[1].enabled = true;
+        dynamicRules[1].level_lt = -1.0f;
+        dynamicRules[1].level_gt = 95.0f;
+        dynamicRules[1].no_flow_sec = 0;
+        dynamicRules[1].priority = 1;
+        
+        strncpy(dynamicRules[2].id, "rule_default_dryrun", 36);
+        strncpy(dynamicRules[2].rule_name, "Borewell Dry Run Protection", 63);
+        strncpy(dynamicRules[2].action, "EMERGENCY_STOP", 15);
+        dynamicRules[2].enabled = true;
+        dynamicRules[2].level_lt = -1.0f;
+        dynamicRules[2].level_gt = -1.0f;
+        dynamicRules[2].no_flow_sec = 120;
+        dynamicRules[2].priority = 0;
+    }
+    
+    Serial.printf("[RULES] Loaded %d dynamic autonomous edge rules from NVS\n", dynamicRuleCount);
+}
+
+void saveRulesToNvs() {
+    preferences.begin("pump_rules", false);
+    preferences.clear();
+    preferences.putUInt("rule_cnt", dynamicRuleCount);
+    for (uint8_t i = 0; i < dynamicRuleCount; i++) {
+        char keyPrefix[16];
+        snprintf(keyPrefix, sizeof(keyPrefix), "r_%d_", i);
+        preferences.putString((String(keyPrefix) + "id").c_str(), dynamicRules[i].id);
+        preferences.putString((String(keyPrefix) + "name").c_str(), dynamicRules[i].rule_name);
+        preferences.putString((String(keyPrefix) + "act").c_str(), dynamicRules[i].action);
+        preferences.putBool((String(keyPrefix) + "en").c_str(), dynamicRules[i].enabled);
+        preferences.putFloat((String(keyPrefix) + "lt").c_str(), dynamicRules[i].level_lt);
+        preferences.putFloat((String(keyPrefix) + "gt").c_str(), dynamicRules[i].level_gt);
+        preferences.putUInt((String(keyPrefix) + "nf").c_str(), dynamicRules[i].no_flow_sec);
+        preferences.putUInt((String(keyPrefix) + "pr").c_str(), dynamicRules[i].priority);
+    }
+    preferences.end();
+    Serial.printf("[RULES] Saved %d dynamic edge rules to NVS\n", dynamicRuleCount);
+}
+
 void loadSavedCredentials() {
     preferences.begin("pump_cfg", true);
     wifiSsid      = preferences.getString("ssid", DEFAULT_WIFI_SSID);
@@ -193,6 +292,8 @@ void loadSavedCredentials() {
     if (mqttBroker.length() == 0) {
         mqttBroker = DEFAULT_MQTT_BROKER;
     }
+
+    loadSavedRules();
 
     Serial.printf("[NVS] Loaded config: SSID='%s', MQTT=%s:%d, API=%s:%d, Auth='%s'\n",
         wifiSsid.c_str(), mqttBroker.c_str(), mqttPort, apiServerHost.c_str(), apiServerPort, authCode.c_str());
@@ -933,8 +1034,16 @@ void onEspNowDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) 
     lastSubNodePacketTime = millis();
     subNodeConnected = true;
 
-    Serial.printf("[ESP-NOW] Rx from Tank SubNode #%d | Water Level: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | TDS: %3.0f ppm ✓\n",
-        packet.node_id, packet.water_level_pct, packet.water_liters, packet.flow_rate_lpm, packet.tds_ppm);
+    // Granular water level sensor probe fault detection
+    if (packet.water_level_pct < 0.0f || (packet.sensor_health & 0x01) == 0) {
+        waterLevelSensorFault = true;
+    } else {
+        waterLevelSensorFault = false;
+    }
+
+    Serial.printf("[ESP-NOW] Rx from Tank SubNode #%d | Water Level: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | TDS: %3.0f ppm %s\n",
+        packet.node_id, packet.water_level_pct, packet.water_liters, packet.flow_rate_lpm, packet.tds_ppm,
+        waterLevelSensorFault ? "[! LEVEL PROBE FAULT]" : "✓");
 }
 
 // =====================================================================
@@ -956,26 +1065,45 @@ void TaskSafetyLoop(void *parameter) {
             }
         }
 
-        // Autonomous Edge Automation Rules
+        // Autonomous Edge Automation Rules (Strict Dynamic Evaluation from Configured Rules)
         if (!systemFault && pumpMode == "AUTOMATIC") {
-            if (!pumpState && latestTankData.water_level_pct <= AUTO_START_LEVEL_PCT && latestTankData.water_level_pct > 0.0f) {
-                Serial.printf("[EDGE AUTO] Water Level (%.1f%%) <= %.1f%% -> AUTO-STARTING PUMP\n",
-                    latestTankData.water_level_pct, AUTO_START_LEVEL_PCT);
-                setPumpState(true, "LOCAL_EDGE_AUTO_START_RULE");
-            }
-            if (pumpState && latestTankData.water_level_pct >= AUTO_STOP_LEVEL_PCT) {
-                Serial.printf("[EDGE AUTO] Water Level (%.1f%%) >= %.1f%% -> AUTO-STOPPING PUMP (Tank Full)\n",
-                    latestTankData.water_level_pct, AUTO_STOP_LEVEL_PCT);
-                setPumpState(false, "LOCAL_EDGE_AUTO_STOP_RULE");
-            }
-            if (pumpState && (millis() - pumpStartMillis > 20000)) {
-                if (latestTankData.flow_rate_lpm < 0.5 && subNodeConnected) {
-                    if (zeroFlowStart == 0) zeroFlowStart = millis();
-                    if (millis() - zeroFlowStart > (DRY_RUN_TIMEOUT_SEC * 1000)) {
-                        triggerEmergencyStop("Borewell Dry Run Protection (Zero Inflow for 120s)");
+            float currentWaterLevel = latestTankData.water_level_pct;
+            bool isLevelValid = subNodeConnected && !waterLevelSensorFault && currentWaterLevel >= 0.0f;
+
+            for (uint8_t i = 0; i < dynamicRuleCount; i++) {
+                if (!dynamicRules[i].enabled) continue;
+
+                // 1. Level Less Than Condition (e.g. Start < 30%)
+                if (isLevelValid && dynamicRules[i].level_lt > 0.0f && currentWaterLevel <= dynamicRules[i].level_lt) {
+                    if (strcmp(dynamicRules[i].action, "START") == 0 && !pumpState) {
+                        Serial.printf("[EDGE AUTO] ✓ Rule '%s' matched (Level %.1f%% <= %.1f%%) -> STARTING PUMP\n",
+                            dynamicRules[i].rule_name, currentWaterLevel, dynamicRules[i].level_lt);
+                        setPumpState(true, dynamicRules[i].rule_name);
+                        break;
                     }
-                } else {
-                    zeroFlowStart = 0;
+                }
+
+                // 2. Level Greater Than Condition (e.g. Stop >= 95%)
+                if (isLevelValid && dynamicRules[i].level_gt > 0.0f && currentWaterLevel >= dynamicRules[i].level_gt) {
+                    if (strcmp(dynamicRules[i].action, "STOP") == 0 && pumpState) {
+                        Serial.printf("[EDGE AUTO] ✓ Rule '%s' matched (Level %.1f%% >= %.1f%%) -> STOPPING PUMP (Tank Full)\n",
+                            dynamicRules[i].rule_name, currentWaterLevel, dynamicRules[i].level_gt);
+                        setPumpState(false, dynamicRules[i].rule_name);
+                        break;
+                    }
+                }
+
+                // 3. Dry Run / Zero Flow Protection
+                if (dynamicRules[i].no_flow_sec > 0 && pumpState && (millis() - pumpStartMillis > 20000)) {
+                    if (latestTankData.flow_rate_lpm < 0.5 && subNodeConnected) {
+                        if (zeroFlowStart == 0) zeroFlowStart = millis();
+                        if (millis() - zeroFlowStart > (dynamicRules[i].no_flow_sec * 1000)) {
+                            triggerEmergencyStop(dynamicRules[i].rule_name);
+                            break;
+                        }
+                    } else {
+                        zeroFlowStart = 0;
+                    }
                 }
             }
         }
@@ -990,7 +1118,7 @@ void TaskSafetyLoop(void *parameter) {
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     digitalWrite(PIN_LED_WIFI, HIGH); // Visual telemetry activity indicator
 
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<1024> doc;
     DeserializationError error = deserializeJson(doc, payload, length);
     
     String action = "";
@@ -1035,6 +1163,58 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         pumpMode = doc["mode"] | doc["payload"]["mode"] | "AUTOMATIC";
         Serial.printf("[MQTT] Pump Mode set to: %s\n", pumpMode.c_str());
         publishHardwareAck(pumpState ? "ON" : "OFF", initiator.c_str(), cmdId.c_str());
+    } else if (action.equalsIgnoreCase("SYNC_RULES") || action.equalsIgnoreCase("SET_RULES") || action.equalsIgnoreCase("UPDATE_RULES")) {
+        JsonArray rulesArr;
+        if (doc.containsKey("rules")) {
+            rulesArr = doc["rules"].as<JsonArray>();
+        } else if (doc["payload"].containsKey("rules")) {
+            rulesArr = doc["payload"]["rules"].as<JsonArray>();
+        }
+        
+        if (rulesArr.size() > 0) {
+            dynamicRuleCount = 0;
+            for (JsonObject r : rulesArr) {
+                if (dynamicRuleCount >= MAX_DYNAMIC_RULES) break;
+                
+                String rId = r["id"] | "";
+                String rName = r["rule_name"] | r["name"] | "Rule";
+                bool rEnabled = r.containsKey("enabled") ? bool(r["enabled"]) : true;
+                uint8_t rPriority = r["priority"] | 1;
+                
+                JsonObject cond = r["condition_json"].is<JsonObject>() ? r["condition_json"].as<JsonObject>() : r["condition"].as<JsonObject>();
+                JsonObject act = r["action_json"].is<JsonObject>() ? r["action_json"].as<JsonObject>() : r["action"].as<JsonObject>();
+                
+                float lt = -1.0f;
+                float gt = -1.0f;
+                uint16_t nf = 0;
+                
+                if (cond.containsKey("level_lt")) lt = cond["level_lt"].as<float>();
+                else if (cond.containsKey("level_lte")) lt = cond["level_lte"].as<float>();
+                else if (cond.containsKey("level_min")) lt = cond["level_min"].as<float>();
+                
+                if (cond.containsKey("level_gt")) gt = cond["level_gt"].as<float>();
+                else if (cond.containsKey("level_gte")) gt = cond["level_gte"].as<float>();
+                else if (cond.containsKey("level_max")) gt = cond["level_max"].as<float>();
+                
+                if (cond.containsKey("no_flow_timeout_seconds")) nf = cond["no_flow_timeout_seconds"].as<uint16_t>();
+                
+                String actStr = act["pump_action"] | act["action"] | "START";
+                
+                strncpy(dynamicRules[dynamicRuleCount].id, rId.c_str(), sizeof(dynamicRules[dynamicRuleCount].id) - 1);
+                strncpy(dynamicRules[dynamicRuleCount].rule_name, rName.c_str(), sizeof(dynamicRules[dynamicRuleCount].rule_name) - 1);
+                strncpy(dynamicRules[dynamicRuleCount].action, actStr.c_str(), sizeof(dynamicRules[dynamicRuleCount].action) - 1);
+                dynamicRules[dynamicRuleCount].enabled = rEnabled;
+                dynamicRules[dynamicRuleCount].level_lt = lt;
+                dynamicRules[dynamicRuleCount].level_gt = gt;
+                dynamicRules[dynamicRuleCount].no_flow_sec = nf;
+                dynamicRules[dynamicRuleCount].priority = rPriority;
+                
+                dynamicRuleCount++;
+            }
+            saveRulesToNvs();
+            Serial.printf("[MQTT] ✓ Synced %d dynamic rules to Edge Hardware Memory & NVS\n", dynamicRuleCount);
+            publishHardwareAck(pumpState ? "ON" : "OFF", "RULES_SYNCED", cmdId.c_str());
+        }
     } else if (action.equalsIgnoreCase("EMERGENCY_STOP") || action.equalsIgnoreCase("ESTOP")) {
         triggerEmergencyStop("Remote Cloud E-Stop Command", cmdId.c_str());
     } else if (action.equalsIgnoreCase("CLEAR_FAULT") || action.equalsIgnoreCase("RESET_FAULT")) {
@@ -1145,26 +1325,27 @@ void TaskNetworkLoop(void *parameter) {
                     // Sub-Node Connection Timeout Watchdog (2.5s)
                     if (millis() - lastSubNodePacketTime > 2500 || lastSubNodePacketTime == 0) {
                         subNodeConnected = false;
+                        waterLevelSensorFault = false;
                     }
 
-                    // If no subnode telemetry received, provide strict 0.0 (No fake simulation numbers)
-                    if (!subNodeConnected) {
-                        latestTankData.water_level_pct = 0.0f;
-                        latestTankData.water_liters = 0.0f;
-                        latestTankData.flow_rate_lpm = 0.0f;
-                        latestTankData.tds_ppm = 0.0f;
-                    }
+                    // Check individual sensor status
+                    bool isLevelGood = subNodeConnected && !waterLevelSensorFault && latestTankData.water_level_pct >= 0.0f;
+                    float levelOut = isLevelGood ? latestTankData.water_level_pct : 0.0f;
+                    float litersOut = isLevelGood ? latestTankData.water_liters : 0.0f;
+                    float flowOut = subNodeConnected ? latestTankData.flow_rate_lpm : 0.0f;
+                    float totalFlowOut = subNodeConnected ? latestTankData.total_inflow_l : 0.0f;
+                    float tdsOut = subNodeConnected ? latestTankData.tds_ppm : 0.0f;
 
                     StaticJsonDocument<512> doc;
                     doc["device_uid"] = DEVICE_UID;
                     doc["timestamp"] = millis() / 1000;
-                    doc["water_level_percentage"] = latestTankData.water_level_pct;
-                    doc["water_level_pct"] = latestTankData.water_level_pct;
-                    doc["water_level_liters"] = latestTankData.water_liters;
-                    doc["flow_rate_lpm"] = latestTankData.flow_rate_lpm;
-                    doc["inflow_rate_lpm"] = latestTankData.flow_rate_lpm;
-                    doc["total_inflow_liters"] = latestTankData.total_inflow_l;
-                    doc["tds_ppm"] = latestTankData.tds_ppm;
+                    doc["water_level_percentage"] = levelOut;
+                    doc["water_level_pct"] = levelOut;
+                    doc["water_level_liters"] = litersOut;
+                    doc["flow_rate_lpm"] = flowOut;
+                    doc["inflow_rate_lpm"] = flowOut;
+                    doc["total_inflow_liters"] = totalFlowOut;
+                    doc["tds_ppm"] = tdsOut;
                     doc["temperature_c"] = latestTankData.temperature_c;
                     doc["pump_running"] = pumpState;
                     doc["pump_state"] = pumpState ? "ON" : "OFF";
@@ -1172,7 +1353,10 @@ void TaskNetworkLoop(void *parameter) {
                     doc["current_amps"] = currentAmps;
                     doc["runtime_seconds"] = totalRuntimeSeconds;
                     doc["subnode_online"] = subNodeConnected;
-                    doc["sensor_status"] = subNodeConnected ? "HEALTHY" : "SUBNODE_DISCONNECTED";
+                    doc["ultrasonic_online"] = isLevelGood;
+                    doc["water_level_fault"] = subNodeConnected && (waterLevelSensorFault || latestTankData.water_level_pct < 0.0f);
+                    doc["sensor_status"] = !subNodeConnected ? "SUBNODE_DISCONNECTED" : (waterLevelSensorFault ? "ULTRASONIC_FAULT" : "HEALTHY");
+                    doc["active_rules_count"] = dynamicRuleCount;
                     doc["rssi"] = WiFi.RSSI();
                     doc["free_heap"] = ESP.getFreeHeap();
                     doc["uptime_seconds"] = millis() / 1000;
@@ -1189,8 +1373,9 @@ void TaskNetworkLoop(void *parameter) {
                     bool p4 = mqttClient.publish(topic4.c_str(), buffer);
 
                     if (packetCounter % 20 == 0) {
-                        Serial.printf("[MQTT 100ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | Pump: %s | P1..4: OK\n",
-                            latestTankData.water_level_pct, latestTankData.water_liters, latestTankData.flow_rate_lpm, pumpState ? "ON" : "OFF");
+                        Serial.printf("[MQTT 100ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | Pump: %s | Status: %s\n",
+                            levelOut, litersOut, flowOut, pumpState ? "ON" : "OFF",
+                            !subNodeConnected ? "NO_SUBNODE" : (waterLevelSensorFault ? "LEVEL_FAULT" : "OK"));
                     }
                 }
             }

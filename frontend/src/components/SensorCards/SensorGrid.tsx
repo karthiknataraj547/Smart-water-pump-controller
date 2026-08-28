@@ -3,7 +3,7 @@ import { useDevice } from '../../context/DeviceContext';
 import { Droplet, Waves, Radio, Sparkles, AlertTriangle } from 'lucide-react';
 
 export const SensorGrid: React.FC = () => {
-  const { telemetry, isDeviceOnline, isSubnodeOnline } = useDevice();
+  const { telemetry, isDeviceOnline, isSubnodeOnline, isWaterLevelSensorOnline } = useDevice();
 
   const isSubnodeHealthy = isDeviceOnline && isSubnodeOnline;
   const inflowRate = isSubnodeHealthy ? Number(telemetry?.inflow_rate_lpm || 0) : 0;
@@ -140,24 +140,31 @@ export const SensorGrid: React.FC = () => {
       </div>
 
       {/* 4. ESP-NOW TANK SUB-NODE TELEMETRY LINK */}
-      <div className={`neu-card p-5 flex flex-col justify-between ${!isSubnodeHealthy && isDeviceOnline ? 'border border-rose-500/60 bg-rose-950/20 animate-pulse' : ''}`}>
+      <div className={`neu-card p-5 flex flex-col justify-between ${(!isSubnodeHealthy && isDeviceOnline) || (isSubnodeHealthy && !isWaterLevelSensorOnline) ? 'border border-amber-500/60' : ''}`}>
         <div className="flex items-center justify-between pb-2 border-b border-slate-700/20">
           <div className="flex items-center space-x-2">
-            <div className={`w-8 h-8 rounded-xl neu-inset flex items-center justify-center ${isSubnodeHealthy ? 'text-cyan-400' : 'text-rose-400'}`}>
+            <div className={`w-8 h-8 rounded-xl neu-inset flex items-center justify-center ${isSubnodeHealthy ? (isWaterLevelSensorOnline ? 'text-cyan-400' : 'text-amber-400') : 'text-rose-400'}`}>
               <Radio className="w-4 h-4" />
             </div>
             <span className="text-xs font-bold uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
               TANK SUB-NODE
             </span>
           </div>
-          <span className={`w-2 h-2 rounded-full neu-dot ${isSubnodeHealthy ? 'neu-dot-emerald' : 'neu-dot-rose'}`} />
+          <span className={`w-2 h-2 rounded-full neu-dot ${isSubnodeHealthy ? (isWaterLevelSensorOnline ? 'neu-dot-emerald' : 'neu-dot-amber') : 'neu-dot-rose'}`} />
         </div>
 
         <div className="neu-screen p-4 my-3.5 flex flex-col items-center justify-center rounded-2xl">
           {isSubnodeHealthy ? (
-            <div className="flex items-baseline space-x-1">
-              <span className="text-3xl font-black text-cyan-400 tracking-wider">{rssi}</span>
-              <span className="text-xs font-mono font-bold text-cyan-400/80">dBm</span>
+            <div className="flex flex-col items-center justify-center text-center">
+              <div className="flex items-baseline space-x-1">
+                <span className="text-3xl font-black text-cyan-400 tracking-wider">{rssi}</span>
+                <span className="text-xs font-mono font-bold text-cyan-400/80">dBm</span>
+              </div>
+              {!isWaterLevelSensorOnline && (
+                <span className="text-[10px] font-mono text-amber-400 font-bold mt-1 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-500/30">
+                  ⚠️ LEVEL PROBE FAULT
+                </span>
+              )}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center text-center">
@@ -168,8 +175,8 @@ export const SensorGrid: React.FC = () => {
               <span className="text-[10px] font-mono text-rose-300 font-bold mt-0.5">ESP-NOW NO SIGNAL</span>
             </div>
           )}
-          <span className={`text-[10px] font-mono mt-0.5 ${isSubnodeHealthy ? 'text-emerald-400' : 'text-rose-400 font-bold'}`}>
-            {isSubnodeHealthy ? 'ESP-NOW DIRECT (100ms)' : 'SUB-NODE DISCONNECTED'}
+          <span className={`text-[10px] font-mono mt-0.5 ${isSubnodeHealthy ? (isWaterLevelSensorOnline ? 'text-emerald-400' : 'text-amber-400 font-bold') : 'text-rose-400 font-bold'}`}>
+            {isSubnodeHealthy ? (isWaterLevelSensorOnline ? 'ESP-NOW DIRECT (100ms)' : 'SUB-NODE OK / PROBE FAULT') : 'SUB-NODE DISCONNECTED'}
           </span>
         </div>
 

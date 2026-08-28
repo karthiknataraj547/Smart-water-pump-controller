@@ -7,6 +7,8 @@ export class AutomationEngine {
   private static instance: AutomationEngine;
   private onTriggerPumpAction?: (deviceId: string, action: 'START' | 'STOP' | 'EMERGENCY_STOP', reason: string) => Promise<void>;
   private lastActionTime: Record<string, number> = {};
+  private lastSubnodeAlertTime: Record<string, number> = {};
+  private lastUltrasonicAlertTime: Record<string, number> = {};
 
   private constructor() {}
 
@@ -51,6 +53,8 @@ export class AutomationEngine {
     water_level_pct: number;
     flow_rate_lpm: number;
     subnode_online?: boolean;
+    water_level_fault?: boolean;
+    sensor_status?: string;
   }): Promise<void> {
     try {
       const device = await db.queryOne<{ id: string; device_uid: string }>(
@@ -74,11 +78,43 @@ export class AutomationEngine {
       const currentWaterLevel = Number(telemetry.water_level_pct);
 
       // =====================================================================
+      // 0. SENSOR & SUBNODE HEALTH MONITORING
+      // =====================================================================
+      const now = Date.now();
+      const subnodeOnline = telemetry.subnode_online !== false;
+      const isUltrasonicFault = Boolean(telemetry.water_level_fault) || (telemetry.water_level_pct < 0) || (telemetry.sensor_status === 'ULTRASONIC_FAULT');
+      const isWaterLevelValid = subnodeOnline && !isUltrasonicFault && currentWaterLevel >= 0.0;
+
+      if (!subnodeOnline) {
+        const lastTime = this.lastSubnodeAlertTime[targetId] || 0;
+        if (now - lastTime > 60000) {
+          this.lastSubnodeAlertTime[targetId] = now;
+          await alertService.createAlert({
+            deviceId: targetId,
+            severity: 'critical',
+            title: 'Tank Sub-Node Disconnected',
+            message: 'Tank Sub-Node (ESP8266) link lost. Telemetry and water level data are currently unavailable.'
+          });
+        }
+      } else if (isUltrasonicFault) {
+        const lastTime = this.lastUltrasonicAlertTime[targetId] || 0;
+        if (now - lastTime > 60000) {
+          this.lastUltrasonicAlertTime[targetId] = now;
+          await alertService.createAlert({
+            deviceId: targetId,
+            severity: 'warning',
+            title: 'Water Level Sensor Hardware Fault',
+            message: 'Tank Sub-Node is connected via ESP-NOW, but the ultrasonic level probe (JSN-SR04T) is not responding or unplugged.'
+          });
+        }
+      }
+
+      // =====================================================================
       // 1. SAFETY CRITICAL RULES (Enforced in ALL modes)
       // =====================================================================
 
       // Safety Rule 1: High Water Overflow Cutoff (>= 95%)
-      if (currentWaterLevel >= 95.0 && isPumpRunning) {
+      if (isWaterLevelValid && currentWaterLevel >= 95.0 && isPumpRunning) {
         console.log(`[Automation Safety] Tank Full (${currentWaterLevel}% >= 95%). Triggering Auto-Stop.`);
         await this.executePumpAction(targetId, 'STOP', `Safety Auto-Stop: Tank level >= 95% (${currentWaterLevel.toFixed(1)}%)`);
         await alertService.createAlert({
@@ -91,7 +127,7 @@ export class AutomationEngine {
       }
 
       // Safety Rule 2: Dry-Run Inflow Detection (Zero Flow after 2 min)
-      if (isPumpRunning && (pumpStatus.runtime_seconds || 0) > 120 && telemetry.flow_rate_lpm < 0.5) {
+      if (isPumpRunning && (pumpStatus.runtime_seconds || 0) > 120 && telemetry.flow_rate_lpm < 0.5 && subnodeOnline) {
         console.warn(`[Automation Safety] DRY RUN DETECTED! Zero flow (${telemetry.flow_rate_lpm} LPM) after 2 min runtime.`);
         await this.executePumpAction(targetId, 'EMERGENCY_STOP', 'Emergency Stop: Borewell Dry Run (Zero Inflow)');
         await alertService.createAlert({
@@ -126,7 +162,7 @@ export class AutomationEngine {
                                  condition.level_lte !== undefined ? Number(condition.level_lte) :
                                  condition.level_min !== undefined ? Number(condition.level_min) : undefined;
 
-            if (lowThreshold !== undefined && currentWaterLevel <= lowThreshold) {
+            if (isWaterLevelValid && lowThreshold !== undefined && currentWaterLevel <= lowThreshold) {
               if ((targetAction === 'START' || targetAction === 'START_PUMP') && isPumpOff) {
                 console.log(`[Automation] ✓ Rule '${rule.rule_name}' met: Water Level (${currentWaterLevel.toFixed(1)}%) <= ${lowThreshold}% -> DISPATCHING AUTO START`);
                 await this.executePumpAction(targetId, 'START', `Automation Rule: ${rule.rule_name} (Level ${currentWaterLevel.toFixed(1)}% <= ${lowThreshold}%)`);
@@ -149,7 +185,7 @@ export class AutomationEngine {
                                   condition.level_gte !== undefined ? Number(condition.level_gte) :
                                   condition.level_max !== undefined ? Number(condition.level_max) : undefined;
 
-            if (highThreshold !== undefined && currentWaterLevel >= highThreshold) {
+            if (isWaterLevelValid && highThreshold !== undefined && currentWaterLevel >= highThreshold) {
               if ((targetAction === 'STOP' || targetAction === 'STOP_PUMP') && isPumpRunning) {
                 console.log(`[Automation] ✓ Rule '${rule.rule_name}' met: Water Level (${currentWaterLevel.toFixed(1)}%) >= ${highThreshold}% -> DISPATCHING AUTO STOP`);
                 await this.executePumpAction(targetId, 'STOP', `Automation Rule: ${rule.rule_name} (Level ${currentWaterLevel.toFixed(1)}% >= ${highThreshold}%)`);
@@ -172,7 +208,7 @@ export class AutomationEngine {
         }
 
         // C) Strict Default Fallback if no specific custom rules matched
-        if (!ruleExecuted) {
+        if (!ruleExecuted && isWaterLevelValid) {
           if (isPumpOff && currentWaterLevel <= 30.0 && currentWaterLevel > 0.0) {
             console.log(`[Automation Default] Tank level (${currentWaterLevel.toFixed(1)}% <= 30%). Dispatching real START command.`);
             await this.executePumpAction(targetId, 'START', `Default Auto-Start: Low level (${currentWaterLevel.toFixed(1)}% <= 30%)`);

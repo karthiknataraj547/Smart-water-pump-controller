@@ -87,6 +87,18 @@ async function bootstrap() {
     onStatus: async (deviceUid, status) => {
       if (status === 'online') {
         deviceHeartbeats.set(deviceUid, Date.now());
+        try {
+          const dev = await db.queryOne<any>('SELECT id, device_uid FROM devices WHERE device_uid = ?', [deviceUid]);
+          if (dev) {
+            const rules = await db.query<any>(
+              'SELECT * FROM automation_rules WHERE device_id = ? OR device_id = ? ORDER BY priority ASC, created_at ASC',
+              [dev.id, dev.device_uid]
+            );
+            mqttBridge.syncDeviceRules(dev.device_uid, rules);
+          }
+        } catch (e: any) {
+          console.warn('[MQTT] Error auto-syncing rules on device online:', e.message);
+        }
       }
       console.log(`[Status] Device ${deviceUid} reported status: ${status}`);
       try {
