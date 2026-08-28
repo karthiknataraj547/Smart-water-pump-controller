@@ -60,7 +60,7 @@ bool EspNowClient::sendTelemetry(float levelPct, float volumeL, float flowLpm, f
 
     uint8_t targetMac[6];
     memcpy(targetMac, MAIN_NODE_MAC, 6);
-    int result = esp_now_send(targetMac, (uint8_t*)&packet, sizeof(TankTelemetryPacket));
+    int result = esp_now_send(targetMac, (uint8_t*)&packet, (uint8_t)sizeof(TankTelemetryPacket));
 
     if (result == 0) {
         packetsSent++;

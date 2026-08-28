@@ -73,7 +73,10 @@ inline int esp_now_register_recv_cb(esp_now_recv_info_cb_t cb) { return 0; }
 inline int esp_now_register_recv_cb(esp8266_now_recv_cb_t cb) { return 0; }
 inline int esp_now_register_send_cb(esp_now_send_cb_t cb) { return 0; }
 inline int esp_now_register_send_cb(esp8266_now_send_cb_t cb) { return 0; }
-inline int esp_now_send(const uint8_t *mac_addr, const uint8_t *data, size_t len) { return 0; }
+inline int esp_now_send(uint8_t *mac_addr, uint8_t *data, uint8_t len) { return 0; }
 inline int esp_now_send(uint8_t *mac_addr, uint8_t *data, int len) { return 0; }
+inline int esp_now_send(uint8_t *mac_addr, uint8_t *data, size_t len) { return 0; }
+inline int esp_now_send(const uint8_t *mac_addr, const uint8_t *data, size_t len) { return 0; }
+inline int esp_now_send(const uint8_t *mac_addr, const uint8_t *data, int len) { return 0; }
 
 #endif // ESP_NOW_H_STUB

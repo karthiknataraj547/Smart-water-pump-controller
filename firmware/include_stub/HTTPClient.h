@@ -14,6 +14,10 @@ public:
     int GET() { return HTTP_CODE_OK; }
     int POST(const String& payload) { return HTTP_CODE_OK; }
     int getSize() { return 1024; }
+    void setTimeout(uint16_t timeout) {}
+    void setTimeout(int timeout) {}
+    void setConnectTimeout(int32_t timeout) {}
+    void setReuse(bool reuse) {}
     WiFiClient& getStream() { static WiFiClient c; return c; }
     WiFiClient* getStreamPtr() { static WiFiClient c; return &c; }
     String errorToString(int code) { return "OK"; }
