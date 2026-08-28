@@ -226,9 +226,9 @@ void loop() {
     // 1. Maintain Flow Metrics continuously
     updateFlowMetrics();
 
-    // 2. Transmit Telemetry every 200ms
+    // 2. Transmit Telemetry every 100ms (10Hz Ultra Real-Time Stream)
     static uint32_t lastTxTime = 0;
-    if (millis() - lastTxTime >= 500) {
+    if (millis() - lastTxTime >= 100) {
         lastTxTime = millis();
 
         // Sample Median Distance from Ultrasonic Sensor
@@ -274,8 +274,8 @@ void loop() {
         int result = esp_now_send(esp32BroadcastMac, (uint8_t*)&packet, sizeof(TankTelemetryPacket));
         digitalWrite(PIN_LED, HIGH); // LED OFF
 
-        if (packet.sequence_num % 4 == 0) {
-            Serial.printf("[TX #%04d | 500ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | TDS: %3.0f ppm %s\n",
+        if (packet.sequence_num % 10 == 0) {
+            Serial.printf("[TX #%04d | 100ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | TDS: %3.0f ppm %s\n",
                 packet.sequence_num, levelPercentage, waterLiters, flowRateLpm, tdsPpm,
                 (result == 0 ? "✓ SENT" : "✗ ERR"));
         }

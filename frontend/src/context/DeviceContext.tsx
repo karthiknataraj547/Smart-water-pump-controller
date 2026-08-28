@@ -283,14 +283,52 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 const hwState: PumpState = isRunning ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
 
                 setPumpStatus(prev => {
-                  // STRICT STATE LOCK: While in STARTING transition, ignore in-flight OFF packets for 5 seconds
-                  if (prev?.pump_state === 'STARTING' && !isRunning && (Date.now() - lastActionTimeRef.current < 5000)) {
-                    return prev;
+                  // If in STARTING transition and hardware confirmed ON, unlock immediately
+                  if (prev?.pump_state === 'STARTING') {
+                    if (isRunning) {
+                      return {
+                        ...(prev || {
+                          id: 'ps_live',
+                          device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                          mode: hwMode,
+                          runtime_seconds: 0,
+                          changed_at: new Date().toISOString(),
+                          changed_by: 'HARDWARE_TELEMETRY'
+                        }),
+                        pump_state: 'ON',
+                        mode: hwMode,
+                        current_draw_amps: hwAmps,
+                        runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
+                      };
+                    }
+                    if (Date.now() - lastActionTimeRef.current < 2500) {
+                      return prev;
+                    }
                   }
-                  // STRICT STATE LOCK: While in STOPPING transition, ignore in-flight ON packets for 5 seconds
-                  if (prev?.pump_state === 'STOPPING' && isRunning && (Date.now() - lastActionTimeRef.current < 5000)) {
-                    return prev;
+
+                  // If in STOPPING transition and hardware confirmed OFF, unlock immediately
+                  if (prev?.pump_state === 'STOPPING') {
+                    if (!isRunning) {
+                      return {
+                        ...(prev || {
+                          id: 'ps_live',
+                          device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                          mode: hwMode,
+                          runtime_seconds: 0,
+                          changed_at: new Date().toISOString(),
+                          changed_by: 'HARDWARE_TELEMETRY'
+                        }),
+                        pump_state: 'OFF',
+                        mode: hwMode,
+                        current_draw_amps: 0.0,
+                        runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
+                      };
+                    }
+                    if (Date.now() - lastActionTimeRef.current < 2500) {
+                      return prev;
+                    }
                   }
+
                   return {
                     ...(prev || {
                       id: 'ps_live',
@@ -307,9 +345,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   };
                 });
 
-                if (isRunning) {
-                  setCommandPending(false);
-                }
+                // Clear commandPending on any state change
+                setCommandPending(false);
               }
             } else if (subTopic === 'ack') {
               const isHwOn = data.confirmed_state === 'ON' || data.pump_state === 'ON' || data.state === 'ON';
@@ -319,8 +356,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const hwRuntime = Number(data.runtime_seconds ?? 0);
 
               setPumpStatus(prev => {
-                // If operator recently clicked START and is STARTING, ignore stale OFF ACKs
-                if (prev?.pump_state === 'STARTING' && !isHwOn && (Date.now() - lastActionTimeRef.current < 5000)) {
+                // If operator recently clicked START and is STARTING, ignore stale OFF ACKs during grace period
+                if (prev?.pump_state === 'STARTING' && !isHwOn && (Date.now() - lastActionTimeRef.current < 2500)) {
+                  return prev;
+                }
+                // If operator recently clicked STOP and is STOPPING, ignore stale ON ACKs during grace period
+                if (prev?.pump_state === 'STOPPING' && isHwOn && (Date.now() - lastActionTimeRef.current < 2500)) {
                   return prev;
                 }
                 return {
@@ -341,7 +382,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
               setCommandPending(false);
               setCommandStatusText(`Hardware Verified: Pump is ${confirmedState} ✓`);
-              setTimeout(() => setCommandStatusText(''), 3000);
+              setTimeout(() => setCommandStatusText(''), 2000);
             } else if (subTopic === 'status') {
               const isOnline = data.status === 'online';
               if (isOnline) {
@@ -354,11 +395,15 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   const isRunning = data.pump_state === 'ON' || data.pump_running === true;
                   const hwState: PumpState = isRunning ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
                   setPumpStatus(prev => {
-                    if (prev?.pump_state === 'STARTING' && !isRunning && (Date.now() - lastActionTimeRef.current < 5000)) {
+                    if (prev?.pump_state === 'STARTING' && !isRunning && (Date.now() - lastActionTimeRef.current < 2500)) {
+                      return prev;
+                    }
+                    if (prev?.pump_state === 'STOPPING' && isRunning && (Date.now() - lastActionTimeRef.current < 2500)) {
                       return prev;
                     }
                     return prev ? { ...prev, pump_state: hwState } : null;
                   });
+                  setCommandPending(false);
                 }
               } else {
                 setSelectedDevice(prev => prev ? { ...prev, status: 'offline' } : prev);
@@ -528,7 +573,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  // Helper to publish direct MQTT command
+  // Helper to publish direct MQTT command (100ms ultra-low latency)
   const publishDirectMqttCommand = (cmdType: string, actionStr: string, payload: any = {}) => {
     const devUid = selectedDevice?.device_uid || 'WPC-A81F29';
     const cmdId = `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -544,19 +589,20 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (mqttClientRef.current && mqttClientRef.current.connected) {
       mqttClientRef.current.publish(`devices/${devUid}/commands`, cmdPayload, { qos: 0 });
       mqttClientRef.current.publish(`aquacontrol/${devUid}/commands`, cmdPayload, { qos: 0 });
-      console.log(`[MQTT Direct] Published command to 'aquacontrol/${devUid}/commands':`, cmdPayload);
+      mqttClientRef.current.publish(`aquacontrol/v1/devices/${devUid}/commands`, cmdPayload, { qos: 0 });
+      console.log(`[MQTT Direct 100ms] Published command to '${devUid}':`, cmdPayload);
     }
   };
 
-  // Hardware-Verified Pump Command Actions
+  // Hardware-Verified Pump Command Actions (100ms Fast Reflection)
   const startPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
     lastActionTimeRef.current = Date.now();
     setCommandPending(true);
-    setCommandStatusText('Trying to Turn ON Pump... Verifying Hardware Contactor');
+    setCommandStatusText('Starting Pump... Verifying Contactor');
 
-    // 1. Transition state (STARTING - Not yet ON until hardware confirms!)
+    // 1. Transition state (STARTING - Immediate visual feedback)
     setPumpStatus(prev => ({
       ...(prev || {
         id: 'ps_opt',
@@ -580,18 +626,18 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.warn('[DeviceContext] Backend start notification note:', err.message);
       });
 
-    // 4. Hardware Verification Timeout (6 seconds)
+    // 4. Hardware Verification Timeout (3.5 seconds)
     setTimeout(() => {
       setPumpStatus(curr => {
         if (curr?.pump_state === 'STARTING') {
           setCommandPending(false);
-          setCommandStatusText('Pump did NOT turn on. Hardware verification failed ✗');
-          setTimeout(() => setCommandStatusText(''), 4000);
+          setCommandStatusText('Pump did NOT turn on. Verification timed out ✗');
+          setTimeout(() => setCommandStatusText(''), 3000);
           return { ...curr, pump_state: 'OFF', current_draw_amps: 0.0 };
         }
         return curr;
       });
-    }, 6000);
+    }, 3500);
   };
 
   const stopPump = async () => {
@@ -599,14 +645,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (!dev) return;
     lastActionTimeRef.current = Date.now();
     setCommandPending(true);
-    setCommandStatusText('Trying to Turn OFF Pump... Verifying Hardware Contactor');
+    setCommandStatusText('Stopping Pump... Verifying Contactor');
 
-    // 1. Transition state (STOPPING - Not yet OFF until hardware confirms!)
+    // 1. Transition state (STOPPING - Immediate visual feedback)
     setPumpStatus(prev => ({
       ...(prev || {
         id: 'ps_opt',
         device_id: dev.id,
-        mode: 'AUTOMATIC',
+        mode: 'MANUAL',
         runtime_seconds: 0,
         changed_at: new Date().toISOString(),
         changed_by: 'WEB_OPERATOR'
@@ -624,18 +670,17 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.warn('[DeviceContext] Backend stop notification note:', err.message);
       });
 
-    // 4. Hardware Verification Timeout (6 seconds)
+    // 4. Hardware Verification Timeout (2.5 seconds)
     setTimeout(() => {
       setPumpStatus(curr => {
         if (curr?.pump_state === 'STOPPING') {
           setCommandPending(false);
-          setCommandStatusText('Pump stop verification timed out');
-          setTimeout(() => setCommandStatusText(''), 3000);
+          setCommandStatusText('');
           return { ...curr, pump_state: 'OFF', current_draw_amps: 0.0 };
         }
         return curr;
       });
-    }, 6000);
+    }, 2500);
   };
 
   const setMode = async (mode: string) => {

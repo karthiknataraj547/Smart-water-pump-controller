@@ -1125,9 +1125,9 @@ void TaskNetworkLoop(void *parameter) {
                 mqttConnected = true;
                 mqttClient.loop();
 
-                // Publish Ultra-Fast Telemetry over MQTT every 500ms (2Hz Smooth Real-Time Stream)
+                // Publish Ultra-Fast Telemetry over MQTT every 100ms (10Hz Real-Time Stream)
                 static uint32_t packetCounter = 0;
-                if (millis() - lastTelemetryPublish >= 500) {
+                if (millis() - lastTelemetryPublish >= 100) {
                     lastTelemetryPublish = millis();
                     packetCounter++;
 
@@ -1171,8 +1171,8 @@ void TaskNetworkLoop(void *parameter) {
                     bool p3 = mqttClient.publish(topic3.c_str(), buffer);
                     bool p4 = mqttClient.publish(topic4.c_str(), buffer);
 
-                    if (packetCounter % 4 == 0) {
-                        Serial.printf("[MQTT 500ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | Pump: %s | P1..4: OK\n",
+                    if (packetCounter % 20 == 0) {
+                        Serial.printf("[MQTT 100ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | Pump: %s | P1..4: OK\n",
                             latestTankData.water_level_pct, latestTankData.water_liters, latestTankData.flow_rate_lpm, pumpState ? "ON" : "OFF");
                     }
                 }
