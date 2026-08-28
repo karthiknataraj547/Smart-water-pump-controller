@@ -12,7 +12,9 @@ class BLEUUID {
 public:
     BLEUUID() {}
     BLEUUID(const char* uuid) {}
+    BLEUUID(const String& uuid) {}
     BLEUUID(uint16_t uuid) {}
+    BLEUUID(uint32_t uuid) {}
 };
 
 class BLEDescriptor {

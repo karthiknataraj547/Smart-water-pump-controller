@@ -7,7 +7,9 @@
 #define ESP_NOW_ROLE_CONTROLLER 1
 #define ESP_NOW_ROLE_SLAVE 2
 #define ESP_NOW_ROLE_COMBO 3
+#ifndef ESP_OK
 #define ESP_OK 0
+#endif
 
 typedef enum {
     WIFI_IF_STA = 0,

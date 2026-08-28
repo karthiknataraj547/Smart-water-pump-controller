@@ -14,6 +14,7 @@ public:
     int GET() { return HTTP_CODE_OK; }
     int POST(const String& payload) { return HTTP_CODE_OK; }
     int getSize() { return 1024; }
+    String getString() { return "{}"; }
     void setTimeout(uint16_t timeout) {}
     void setTimeout(int timeout) {}
     void setConnectTimeout(int32_t timeout) {}

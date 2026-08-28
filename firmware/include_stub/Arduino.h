@@ -240,8 +240,16 @@ inline long random(long min, long max) { return min; }
 inline long random(long max) { return 0; }
 
 // FreeRTOS types & macros
+#ifndef _TASK_HANDLE_T_DEFINED
+#define _TASK_HANDLE_T_DEFINED
 typedef void* TaskHandle_t;
+#endif
+
+#ifndef _TASK_FUNCTION_T_DEFINED
+#define _TASK_FUNCTION_T_DEFINED
 typedef void (*TaskFunction_t)(void*);
+#endif
+
 #define pdMS_TO_TICKS(ms) (ms)
 #define portMAX_DELAY 0xFFFFFFFF
 inline void vTaskDelay(unsigned long ticks) {}
