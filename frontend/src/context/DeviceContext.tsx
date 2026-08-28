@@ -15,6 +15,8 @@ interface DeviceContextType {
   wsConnected: boolean;
   mqttConnected: boolean;
   isDeviceOnline: boolean;
+  isSubnodeOnline: boolean;
+  subnodeError: string | null;
   commandPending: boolean;
   commandStatusText: string;
   refreshDevices: () => Promise<void>;
@@ -66,9 +68,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [commandPending, setCommandPending] = useState<boolean>(false);
   const [commandStatusText, setCommandStatusText] = useState<string>('');
   
-  // Real-Time Heartbeat Tracker (Lightweight, 0 Freezing, 0 False Offline Flashes)
+  // Real-Time Heartbeat Tracker
   const [isDeviceOnline, setIsDeviceOnline] = useState<boolean>(false);
+  const [isSubnodeOnline, setIsSubnodeOnline] = useState<boolean>(true);
+  const [subnodeError, setSubnodeError] = useState<string | null>(null);
   const lastTelemetryTimestampRef = useRef<number>(0);
+  const lastSubnodeTimestampRef = useRef<number>(Date.now());
 
   const wsRef = useRef<WebSocket | null>(null);
   const mqttClientRef = useRef<MqttClient | null>(null);
@@ -254,13 +259,38 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
               setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
 
+              const isSubOnline = data.subnode_online !== undefined ? Boolean(data.subnode_online) : 
+                                  (data.subNodeOnline !== undefined ? Boolean(data.subNodeOnline) : true);
+              setIsSubnodeOnline(isSubOnline);
+              if (isSubOnline) {
+                lastSubnodeTimestampRef.current = now;
+                setSubnodeError(null);
+              } else {
+                setSubnodeError('Tank Sub-Node Disconnected (ESP-NOW RF Link Lost)');
+                setAlerts(prev => {
+                  if (prev.some(a => a.id === 'alert_subnode_lost' && !a.acknowledged)) return prev;
+                  return [
+                    {
+                      id: 'alert_subnode_lost',
+                      device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                      severity: 'critical',
+                      title: 'TANK SENSOR SUB-NODE DISCONNECTED',
+                      message: 'Main controller is not receiving data from Tank Sub-Node (ESP8266). Water level and flow sensors are offline.',
+                      acknowledged: false,
+                      created_at: new Date().toISOString()
+                    },
+                    ...prev
+                  ];
+                });
+              }
+
               const waterPct = Number(data.water_level_percentage ?? data.water_level_pct ?? data.waterLevelPercentage ?? 0);
               const waterLiters = Number(data.water_level_liters ?? data.waterLevelLiters ?? (waterPct * 20));
               const flowRate = Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? data.inflowRateLpm ?? 0);
               const totalLiters = Number(data.total_inflow_liters ?? data.total_inflow_l ?? data.totalInflowLiters ?? 0);
               const tds = Number(data.tds_ppm ?? data.tdsPpm ?? 0);
               const temp = Number(data.temperature_c ?? data.temperatureC ?? 25);
-              const status = data.sensor_status || data.sensorStatus || 'HEALTHY';
+              const status = data.sensor_status || data.sensorStatus || (isSubOnline ? 'HEALTHY' : 'SUBNODE_DISCONNECTED');
 
               setTelemetry({
                 id: `tel_${now}`,
@@ -282,70 +312,21 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 const hwMode = (data.pump_mode || 'AUTOMATIC') as any;
                 const hwState: PumpState = isRunning ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
 
-                setPumpStatus(prev => {
-                  // If in STARTING transition and hardware confirmed ON, unlock immediately
-                  if (prev?.pump_state === 'STARTING') {
-                    if (isRunning) {
-                      return {
-                        ...(prev || {
-                          id: 'ps_live',
-                          device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                          mode: hwMode,
-                          runtime_seconds: 0,
-                          changed_at: new Date().toISOString(),
-                          changed_by: 'HARDWARE_TELEMETRY'
-                        }),
-                        pump_state: 'ON',
-                        mode: hwMode,
-                        current_draw_amps: hwAmps,
-                        runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
-                      };
-                    }
-                    if (Date.now() - lastActionTimeRef.current < 2500) {
-                      return prev;
-                    }
-                  }
-
-                  // If in STOPPING transition and hardware confirmed OFF, unlock immediately
-                  if (prev?.pump_state === 'STOPPING') {
-                    if (!isRunning) {
-                      return {
-                        ...(prev || {
-                          id: 'ps_live',
-                          device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                          mode: hwMode,
-                          runtime_seconds: 0,
-                          changed_at: new Date().toISOString(),
-                          changed_by: 'HARDWARE_TELEMETRY'
-                        }),
-                        pump_state: 'OFF',
-                        mode: hwMode,
-                        current_draw_amps: 0.0,
-                        runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
-                      };
-                    }
-                    if (Date.now() - lastActionTimeRef.current < 2500) {
-                      return prev;
-                    }
-                  }
-
-                  return {
-                    ...(prev || {
-                      id: 'ps_live',
-                      device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                      mode: hwMode,
-                      runtime_seconds: 0,
-                      changed_at: new Date().toISOString(),
-                      changed_by: 'HARDWARE_TELEMETRY'
-                    }),
-                    pump_state: hwState,
+                setPumpStatus(prev => ({
+                  ...(prev || {
+                    id: 'ps_live',
+                    device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
                     mode: hwMode,
-                    current_draw_amps: hwAmps,
-                    runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
-                  };
-                });
+                    runtime_seconds: 0,
+                    changed_at: new Date().toISOString(),
+                    changed_by: 'HARDWARE_TELEMETRY'
+                  }),
+                  pump_state: hwState,
+                  mode: hwMode,
+                  current_draw_amps: hwAmps,
+                  runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
+                }));
 
-                // Clear commandPending on any state change
                 setCommandPending(false);
               }
             } else if (subTopic === 'ack') {
@@ -355,34 +336,22 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const hwAmps = Number(data.current_amps ?? (confirmedState === 'ON' ? 4.8 : 0.0));
               const hwRuntime = Number(data.runtime_seconds ?? 0);
 
-              setPumpStatus(prev => {
-                // If operator recently clicked START and is STARTING, ignore stale OFF ACKs during grace period
-                if (prev?.pump_state === 'STARTING' && !isHwOn && (Date.now() - lastActionTimeRef.current < 2500)) {
-                  return prev;
-                }
-                // If operator recently clicked STOP and is STOPPING, ignore stale ON ACKs during grace period
-                if (prev?.pump_state === 'STOPPING' && isHwOn && (Date.now() - lastActionTimeRef.current < 2500)) {
-                  return prev;
-                }
-                return {
-                  ...(prev || {
-                    id: 'ps_live',
-                    device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                    mode: 'AUTOMATIC',
-                    runtime_seconds: 0,
-                    changed_at: new Date().toISOString(),
-                    changed_by: 'HARDWARE_ACK'
-                  }),
-                  pump_state: confirmedState,
-                  mode: (data.pump_mode || prev?.mode || 'AUTOMATIC') as any,
-                  current_draw_amps: hwAmps,
-                  runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
-                };
-              });
+              setPumpStatus(prev => ({
+                ...(prev || {
+                  id: 'ps_live',
+                  device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                  mode: 'AUTOMATIC',
+                  runtime_seconds: 0,
+                  changed_at: new Date().toISOString(),
+                  changed_by: 'HARDWARE_ACK'
+                }),
+                pump_state: confirmedState,
+                mode: (data.pump_mode || prev?.mode || 'AUTOMATIC') as any,
+                current_draw_amps: hwAmps,
+                runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
+              }));
 
               setCommandPending(false);
-              setCommandStatusText(`Hardware Verified: Pump is ${confirmedState} ✓`);
-              setTimeout(() => setCommandStatusText(''), 2000);
             } else if (subTopic === 'status') {
               const isOnline = data.status === 'online';
               if (isOnline) {
@@ -594,70 +563,57 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  // Hardware-Verified Pump Command Actions (100ms Fast Reflection)
+  // Immediate Zero-Wait Pump Command Actions (Instant UI Response, Backend Handles Verification & Logic)
   const startPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
     lastActionTimeRef.current = Date.now();
-    setCommandPending(true);
-    setCommandStatusText('Starting Pump... Verifying Contactor');
+    setCommandPending(false);
+    setCommandStatusText('');
 
-    // 1. Transition state (STARTING - Immediate visual feedback)
+    // 1. Instant optimistic state update on frontend
     setPumpStatus(prev => ({
       ...(prev || {
-        id: 'ps_opt',
+        id: 'ps_live',
         device_id: dev.id,
         mode: 'MANUAL',
         runtime_seconds: 0,
         changed_at: new Date().toISOString(),
         changed_by: 'WEB_OPERATOR'
       }),
-      pump_state: 'STARTING',
-      mode: 'MANUAL',
-      current_draw_amps: 0.0
+      pump_state: 'ON',
+      mode: prev?.mode === 'AUTOMATIC' ? 'AUTOMATIC' : 'MANUAL',
+      current_draw_amps: 4.8
     }));
 
     // 2. Direct MQTT Command dispatch to hardware
     publishDirectMqttCommand('START_PUMP', 'START');
 
-    // 3. Parallel REST API notification
+    // 3. Parallel REST API notification (Backend handles database persistence, command queuing & verification)
     ApiService.startPump(dev.id, user?.email || 'web_operator')
       .catch((err: any) => {
         console.warn('[DeviceContext] Backend start notification note:', err.message);
       });
-
-    // 4. Hardware Verification Timeout (3.5 seconds)
-    setTimeout(() => {
-      setPumpStatus(curr => {
-        if (curr?.pump_state === 'STARTING') {
-          setCommandPending(false);
-          setCommandStatusText('Pump did NOT turn on. Verification timed out ✗');
-          setTimeout(() => setCommandStatusText(''), 3000);
-          return { ...curr, pump_state: 'OFF', current_draw_amps: 0.0 };
-        }
-        return curr;
-      });
-    }, 3500);
   };
 
   const stopPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
     lastActionTimeRef.current = Date.now();
-    setCommandPending(true);
-    setCommandStatusText('Stopping Pump... Verifying Contactor');
+    setCommandPending(false);
+    setCommandStatusText('');
 
-    // 1. Transition state (STOPPING - Immediate visual feedback)
+    // 1. Instant optimistic state update on frontend
     setPumpStatus(prev => ({
       ...(prev || {
-        id: 'ps_opt',
+        id: 'ps_live',
         device_id: dev.id,
         mode: 'MANUAL',
         runtime_seconds: 0,
         changed_at: new Date().toISOString(),
         changed_by: 'WEB_OPERATOR'
       }),
-      pump_state: 'STOPPING',
+      pump_state: 'OFF',
       current_draw_amps: 0.0
     }));
 
@@ -669,18 +625,6 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       .catch((err: any) => {
         console.warn('[DeviceContext] Backend stop notification note:', err.message);
       });
-
-    // 4. Hardware Verification Timeout (2.5 seconds)
-    setTimeout(() => {
-      setPumpStatus(curr => {
-        if (curr?.pump_state === 'STOPPING') {
-          setCommandPending(false);
-          setCommandStatusText('');
-          return { ...curr, pump_state: 'OFF', current_draw_amps: 0.0 };
-        }
-        return curr;
-      });
-    }, 2500);
   };
 
   const setMode = async (mode: string) => {
@@ -703,12 +647,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
     lastActionTimeRef.current = Date.now();
-    setCommandStatusText('ACTIVATING HARDWARE EMERGENCY CUTOFF...');
+    setCommandPending(false);
+    setCommandStatusText('');
 
     // 1. Instant 0ms Optimistic UI Update
     setPumpStatus(prev => ({
       ...(prev || {
-        id: 'ps_opt',
+        id: 'ps_live',
         device_id: dev.id,
         mode: 'MANUAL',
         runtime_seconds: 0,
@@ -724,14 +669,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     // 3. Parallel REST API notification
     ApiService.emergencyStop(dev.id, reason || 'Operator UI E-Stop')
-      .then(() => {
-        setCommandStatusText('Emergency Lockout Armed ✓');
-        setTimeout(() => setCommandStatusText(''), 2000);
-      })
       .catch((err: any) => {
         console.warn('[DeviceContext] Backend emergencyStop notification note:', err.message);
-        setCommandStatusText('E-Stop Dispatched via Cloud MQTT ✓');
-        setTimeout(() => setCommandStatusText(''), 2000);
       });
   };
 
@@ -757,6 +696,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         wsConnected,
         mqttConnected,
         isDeviceOnline,
+        isSubnodeOnline,
+        subnodeError,
         commandPending,
         commandStatusText,
         refreshDevices,

@@ -99,6 +99,8 @@ void CloudClient::publishTelemetry(const TankTelemetryPacket& packet, float curr
         doc["current_amps"] = currentAmps;
         doc["pump_state"] = (pumpState == PUMP_ON) ? "ON" : (pumpState == PUMP_FAULT ? "FAULT" : "OFF");
         doc["runtime_sec"] = pumpCtrl.getRuntimeSeconds();
+        doc["subnode_online"] = espNowMgr.isSubnodeConnected();
+        doc["sensor_status"] = espNowMgr.isSubnodeConnected() ? "HEALTHY" : "SUBNODE_DISCONNECTED";
         doc["rssi"] = wifiMgr.getRssi();
 
         char buffer[512];

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { AlertTriangle } from 'lucide-react';
 
 interface TankCanvasProps {
   levelPercentage: number;
@@ -6,6 +7,8 @@ interface TankCanvasProps {
   maxCapacityLiters?: number;
   inflowRateLpm?: number;
   isPumpRunning?: boolean;
+  isSubnodeOnline?: boolean;
+  isDeviceOnline?: boolean;
 }
 
 export const TankCanvas: React.FC<TankCanvasProps> = ({
@@ -13,7 +16,9 @@ export const TankCanvas: React.FC<TankCanvasProps> = ({
   volumeLiters,
   maxCapacityLiters = 2000,
   inflowRateLpm = 0,
-  isPumpRunning = false
+  isPumpRunning = false,
+  isSubnodeOnline = true,
+  isDeviceOnline = true
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -172,26 +177,43 @@ export const TankCanvas: React.FC<TankCanvasProps> = ({
             CHAMBER WATER LEVEL
           </span>
           <div className="flex items-baseline space-x-1">
-            <span className="text-3xl font-black text-cyan-400 tracking-wider">{levelPercentage.toFixed(1)}</span>
+            <span className="text-3xl font-black text-cyan-400 tracking-wider">
+              {isSubnodeOnline && isDeviceOnline ? levelPercentage.toFixed(1) : '---'}
+            </span>
             <span className="text-sm font-bold text-cyan-300 font-mono">%</span>
           </div>
           <span className="text-[11px] text-slate-400 font-mono mt-0.5 font-bold">
-            {volumeLiters.toFixed(0)} / {maxCapacityLiters} Liters
+            {isSubnodeOnline && isDeviceOnline ? `${volumeLiters.toFixed(0)} / ${maxCapacityLiters} Liters` : 'DATA UNAVAILABLE'}
           </span>
         </div>
 
         {/* Dynamic Status Pill at Top Right */}
         <div className="absolute top-6 right-6 flex items-center space-x-2 neu-inset px-4 py-2 rounded-2xl">
-          <span className={`w-2.5 h-2.5 rounded-full neu-dot ${isPumpRunning ? 'neu-dot-emerald animate-pulse' : 'neu-dot-cyan'}`} />
+          <span className={`w-2.5 h-2.5 rounded-full neu-dot ${!isSubnodeOnline || !isDeviceOnline ? 'neu-dot-rose' : (isPumpRunning ? 'neu-dot-emerald animate-pulse' : 'neu-dot-cyan')}`} />
           <span className="text-[11px] font-extrabold uppercase tracking-wide" style={{ fontFamily: 'var(--font-display)' }}>
-            {levelPercentage >= 95 ? 'TANK FULL' : (levelPercentage <= 25 ? 'LOW WATER' : 'OPTIMAL')}
+            {!isDeviceOnline ? 'OFFLINE' : !isSubnodeOnline ? 'SENSOR ERROR' : (levelPercentage >= 95 ? 'TANK FULL' : (levelPercentage <= 25 ? 'LOW WATER' : 'OPTIMAL'))}
           </span>
-          {inflowRateLpm > 0 && (
+          {isSubnodeOnline && isDeviceOnline && inflowRateLpm > 0 && (
             <span className="text-[11px] text-emerald-400 font-mono font-bold ml-1">
               +{inflowRateLpm.toFixed(1)} L/m
             </span>
           )}
         </div>
+
+        {/* Sub-Node Offline Warning Overlay */}
+        {isDeviceOnline && !isSubnodeOnline && (
+          <div className="absolute inset-0 bg-black/75 backdrop-blur-[2px] flex flex-col items-center justify-center p-6 text-center z-10 rounded-3xl animate-pulse">
+            <div className="w-12 h-12 rounded-2xl neu-inset flex items-center justify-center text-rose-400 mb-2 border border-rose-500/30">
+              <AlertTriangle className="w-6 h-6 text-rose-400 animate-bounce" />
+            </div>
+            <span className="text-sm font-black text-rose-400 uppercase tracking-wider font-mono">
+              TANK SENSOR OFFLINE (NO DATA)
+            </span>
+            <p className="text-xs text-rose-200/90 font-mono mt-1 max-w-xs">
+              ESP-NOW link to Tank Sub-Node (ESP8266) is lost. Ultrasonic level & volume readings unavailable.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

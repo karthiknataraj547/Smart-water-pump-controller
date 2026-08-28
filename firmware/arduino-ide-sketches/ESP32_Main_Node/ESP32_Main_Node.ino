@@ -1142,6 +1142,11 @@ void TaskNetworkLoop(void *parameter) {
                     lastTelemetryPublish = millis();
                     packetCounter++;
 
+                    // Sub-Node Connection Timeout Watchdog (2.5s)
+                    if (millis() - lastSubNodePacketTime > 2500 || lastSubNodePacketTime == 0) {
+                        subNodeConnected = false;
+                    }
+
                     // If no subnode telemetry received, provide strict 0.0 (No fake simulation numbers)
                     if (!subNodeConnected) {
                         latestTankData.water_level_pct = 0.0f;
@@ -1167,6 +1172,7 @@ void TaskNetworkLoop(void *parameter) {
                     doc["current_amps"] = currentAmps;
                     doc["runtime_seconds"] = totalRuntimeSeconds;
                     doc["subnode_online"] = subNodeConnected;
+                    doc["sensor_status"] = subNodeConnected ? "HEALTHY" : "SUBNODE_DISCONNECTED";
                     doc["rssi"] = WiFi.RSSI();
                     doc["free_heap"] = ESP.getFreeHeap();
                     doc["uptime_seconds"] = millis() / 1000;

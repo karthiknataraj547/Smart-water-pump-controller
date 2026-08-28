@@ -16,17 +16,18 @@ import { Cpu, UploadCloud } from 'lucide-react';
 import { ApiService } from './services/api';
 
 export const UserApp: React.FC = () => {
-  const { selectedDevice, pumpStatus, telemetry, alerts, isDeviceOnline } = useDevice();
+  const { selectedDevice, pumpStatus, telemetry, alerts, isDeviceOnline, isSubnodeOnline } = useDevice();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [otaStatus, setOtaStatus] = useState<string>('');
 
-  const isRunning = isDeviceOnline && pumpStatus?.pump_state === 'ON';
-  const waterPct = isDeviceOnline ? Number(telemetry?.water_level_percentage ?? 0) : 0;
-  const volumeLiters = isDeviceOnline ? Number(telemetry?.water_level_liters ?? (waterPct * 20)) : 0;
-  const inflowRate = isDeviceOnline ? Number(telemetry?.inflow_rate_lpm ?? 0) : 0;
+  const isRunning = isDeviceOnline && (pumpStatus?.pump_state === 'ON' || pumpStatus?.pump_state === 'STARTING');
+  const isSubnodeHealthy = isDeviceOnline && isSubnodeOnline;
+  const waterPct = isSubnodeHealthy ? Number(telemetry?.water_level_percentage ?? 0) : 0;
+  const volumeLiters = isSubnodeHealthy ? Number(telemetry?.water_level_liters ?? (waterPct * 20)) : 0;
+  const inflowRate = isSubnodeHealthy ? Number(telemetry?.inflow_rate_lpm ?? 0) : 0;
   const unackAlerts = alerts.filter(a => !a.acknowledged).length;
 
   const triggerOtaUpdate = async () => {
@@ -110,6 +111,8 @@ export const UserApp: React.FC = () => {
                       maxCapacityLiters={selectedDevice?.tank_capacity_liters || 2000}
                       inflowRateLpm={inflowRate}
                       isPumpRunning={isRunning}
+                      isSubnodeOnline={isSubnodeOnline}
+                      isDeviceOnline={isDeviceOnline}
                     />
                   </div>
                 </div>

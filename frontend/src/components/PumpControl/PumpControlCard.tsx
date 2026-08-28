@@ -17,9 +17,7 @@ export const PumpControlCard: React.FC = () => {
     isDeviceOnline
   } = useDevice();
 
-  const isStarting = isDeviceOnline && pumpStatus?.pump_state === 'STARTING';
-  const isStopping = isDeviceOnline && pumpStatus?.pump_state === 'STOPPING';
-  const isRunning = isDeviceOnline && pumpStatus?.pump_state === 'ON';
+  const isRunning = isDeviceOnline && (pumpStatus?.pump_state === 'ON' || pumpStatus?.pump_state === 'STARTING');
   const isFault = isDeviceOnline && pumpStatus?.pump_state === 'FAULT';
   const currentMode = pumpStatus?.mode || 'AUTOMATIC';
   const runtimeSec = Number(pumpStatus?.runtime_seconds) || 0;
@@ -29,8 +27,8 @@ export const PumpControlCard: React.FC = () => {
   // Maximum water level off threshold for automation
   const autoCutoffThreshold = 95.0;
   const isTankFullInAuto = currentMode === 'AUTOMATIC' && currentWaterLevel >= autoCutoffThreshold;
-  const isStartDisabled = !isDeviceOnline || commandPending || isRunning || isStarting || isTankFullInAuto;
-  const isStopDisabled = !isDeviceOnline || commandPending || (!isRunning && !isStarting) || isStopping;
+  const isStartDisabled = !isDeviceOnline || isRunning || isTankFullInAuto;
+  const isStopDisabled = !isDeviceOnline || !isRunning;
 
   // Format runtime to HH:MM:SS
   const formatRuntime = (totalSec: number) => {
@@ -67,10 +65,6 @@ export const PumpControlCard: React.FC = () => {
                   ? 'neu-dot-rose'
                   : isFault
                   ? 'neu-dot-rose animate-pulse'
-                  : isStarting
-                  ? 'neu-dot-amber animate-pulse'
-                  : isStopping
-                  ? 'neu-dot-amber animate-pulse'
                   : isRunning
                   ? 'neu-dot-emerald animate-pulse'
                   : 'bg-slate-500'
@@ -82,12 +76,8 @@ export const PumpControlCard: React.FC = () => {
                   ? 'text-rose-400 font-black'
                   : isFault
                   ? 'text-rose-400'
-                  : isStarting
-                  ? 'text-amber-400 animate-pulse font-black'
-                  : isStopping
-                  ? 'text-amber-400 animate-pulse font-black'
                   : isRunning
-                  ? 'text-emerald-400'
+                  ? 'text-emerald-400 font-black'
                   : 'text-slate-400'
               }`}
             >
@@ -95,10 +85,6 @@ export const PumpControlCard: React.FC = () => {
                 ? 'HARDWARE UNPOWERED / OFFLINE'
                 : isFault
                 ? 'FAULT / LOCKOUT'
-                : isStarting
-                ? 'TRYING TO TURN ON...'
-                : isStopping
-                ? 'TRYING TO TURN OFF...'
                 : isRunning
                 ? 'RUNNING'
                 : 'STANDBY'}
@@ -173,8 +159,6 @@ export const PumpControlCard: React.FC = () => {
             className={`py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 transition-all ${
               isRunning
                 ? 'opacity-40 cursor-not-allowed neu-inset text-slate-500'
-                : isStarting
-                ? 'neu-inset text-amber-400 border border-amber-500/50 cursor-wait animate-pulse'
                 : isTankFullInAuto
                 ? 'opacity-60 cursor-not-allowed neu-inset text-amber-400 border border-amber-500/30'
                 : 'neu-btn neu-btn-success cursor-pointer'
@@ -182,13 +166,11 @@ export const PumpControlCard: React.FC = () => {
           >
             {isTankFullInAuto ? (
               <Lock className="w-5 h-5 text-amber-400" />
-            ) : isStarting ? (
-              <Zap className="w-5 h-5 text-amber-400 animate-spin" />
             ) : (
               <Power className="w-5 h-5" />
             )}
             <span className="text-sm font-extrabold tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
-              {isTankFullInAuto ? 'AUTO CUTOFF' : isStarting ? 'TRYING TO TURN ON...' : 'START PUMP'}
+              {isTankFullInAuto ? 'AUTO CUTOFF' : 'START PUMP'}
             </span>
           </button>
 
@@ -197,16 +179,14 @@ export const PumpControlCard: React.FC = () => {
             disabled={isStopDisabled}
             onClick={stopPump}
             className={`py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 transition-all ${
-              isStopping
-                ? 'neu-inset text-amber-400 border border-amber-500/50 cursor-wait animate-pulse'
-                : !isRunning
+              !isRunning
                 ? 'opacity-40 cursor-not-allowed neu-inset text-slate-500'
                 : 'neu-btn neu-btn-danger cursor-pointer'
             }`}
           >
             <Power className="w-5 h-5 rotate-180" />
             <span className="text-sm font-extrabold tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
-              {isStopping ? 'TRYING TO TURN OFF...' : 'STOP PUMP'}
+              STOP PUMP
             </span>
           </button>
         </div>
