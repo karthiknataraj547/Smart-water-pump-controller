@@ -48,20 +48,25 @@ public:
     JsonVariant operator[](const String& key) const { return JsonVariant(); }
     bool containsKey(const char* key) const { return true; }
     bool containsKey(const String& key) const { return true; }
-    JsonObject createNestedObject(const char* key) { return JsonObject(); }
-    JsonArray createNestedArray(const char* key) { return JsonArray(); }
+    inline JsonObject createNestedObject(const char* key);
+    inline JsonArray createNestedArray(const char* key);
 };
 
 class JsonArray {
 public:
     JsonArray() {}
-    JsonObject createNestedObject() { return JsonObject(); }
-    JsonArray createNestedArray() { return JsonArray(); }
+    inline JsonObject createNestedObject();
+    inline JsonArray createNestedArray();
     JsonVariant operator[](size_t index) const { return JsonVariant(); }
     size_t size() const { return 0; }
     template<typename T>
     bool add(T v) { return true; }
 };
+
+inline JsonObject JsonObject::createNestedObject(const char* key) { return JsonObject(); }
+inline JsonArray JsonObject::createNestedArray(const char* key) { return JsonArray(); }
+inline JsonObject JsonArray::createNestedObject() { return JsonObject(); }
+inline JsonArray JsonArray::createNestedArray() { return JsonArray(); }
 
 template<size_t CAPACITY>
 class StaticJsonDocument {

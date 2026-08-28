@@ -9,9 +9,13 @@
 #define PROGMEM
 #endif
 
-#include <functional>
-
-typedef std::function<void(void)> THandlerFunction;
+class THandlerFunction {
+public:
+    THandlerFunction() {}
+    template<typename F>
+    THandlerFunction(F f) {}
+    void operator()() const {}
+};
 
 enum HTTPMethod {
     HTTP_ANY     = 0,
@@ -29,13 +33,31 @@ public:
     void begin() {}
     void stop() {}
     void handleClient() {}
+
+    template<typename F>
+    void on(const String& uri, F handler) {}
+    template<typename F>
+    void on(const char* uri, F handler) {}
+    template<typename F>
+    void on(const String& uri, HTTPMethod method, F handler) {}
+    template<typename F>
+    void on(const char* uri, HTTPMethod method, F handler) {}
+    template<typename F>
+    void on(const String& uri, int method, F handler) {}
+    template<typename F>
+    void on(const char* uri, int method, F handler) {}
+
     void on(const String& uri, THandlerFunction handler) {}
     void on(const char* uri, THandlerFunction handler) {}
     void on(const String& uri, HTTPMethod method, THandlerFunction handler) {}
     void on(const char* uri, HTTPMethod method, THandlerFunction handler) {}
     void on(const String& uri, int method, THandlerFunction handler) {}
     void on(const char* uri, int method, THandlerFunction handler) {}
+    
+    template<typename F>
+    void onNotFound(F handler) {}
     void onNotFound(THandlerFunction handler) {}
+
     void send(int code, const char* contentType = "text/plain", const char* content = "") {}
     void send(int code, const char* contentType, const String& content) {}
     void send(int code, const String& contentType, const String& content) {}
