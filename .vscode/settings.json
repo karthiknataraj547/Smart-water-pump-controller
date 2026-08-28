@@ -1,4 +1,7 @@
 {
+    "files.associations": {
+        "*.ino": "cpp"
+    },
     "python.testing.unittestArgs": [
         "-v",
         "-s",

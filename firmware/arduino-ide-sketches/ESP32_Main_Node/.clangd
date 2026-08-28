@@ -7,8 +7,14 @@ CompileFlags:
     - "-I../../include_stub"
     - "-Id:/Smart water pump conroller/firmware/include_stub"
     - "-Id:/Smart water pump conroller/firmware/esp32-main-node/include"
-    - "-Wno-everything"
+    - "-w"
+    - "-ferror-limit=0"
 Diagnostics:
   Suppress:
-    - "*"
+    - "pp_file_not_found"
+    - "drv_unknown_argument"
+    - "drv_unable_to_handle_compilation"
+    - "drv_expected_compiler_job"
+    - "unused-includes"
+    - "macro-redefined"
 

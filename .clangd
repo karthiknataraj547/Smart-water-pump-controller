@@ -14,7 +14,8 @@ CompileFlags:
     - "-Id:/Smart water pump conroller/firmware/esp8266-sub-node/include"
     - "-I./firmware/esp32-main-node/include"
     - "-I./firmware/esp8266-sub-node/include"
-    - "-Wno-everything"
+    - "-w"
+    - "-ferror-limit=0"
 Diagnostics:
   Suppress:
     - "pp_file_not_found"
