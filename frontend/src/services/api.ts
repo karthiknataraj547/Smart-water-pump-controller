@@ -463,23 +463,85 @@ export class ApiService {
     }
 
     // E. Automation Rules
-    if (endpoint.startsWith('/automation/')) {
+    if (endpoint.startsWith('/automation')) {
       const devId = store.devices[0]?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5';
+      if (!store.rules[devId]) {
+        store.rules[devId] = [];
+      }
+
       if (method === 'GET') {
         return Promise.resolve((store.rules[devId] || []) as any);
       }
       if (method === 'POST') {
-        const newRule = { id: `rule_${Date.now()}`, device_id: devId, ...body, enabled: true, created_at: new Date().toISOString() };
-        if (!store.rules[devId]) store.rules[devId] = [];
+        const newRule = {
+          id: `rule_${Date.now()}`,
+          device_id: devId,
+          ...body,
+          enabled: body.enabled !== false,
+          created_at: new Date().toISOString()
+        };
         store.rules[devId].push(newRule);
         saveLocalStore(store);
         return Promise.resolve(newRule as any);
       }
       if (method === 'PATCH') {
-        return Promise.resolve({ success: true } as any);
+        // Find rule ID from endpoint pattern: /automation/:deviceId/rules/:ruleId/toggle or /automation/rules/:ruleId/toggle
+        const parts = endpoint.split('/');
+        const toggleIdx = parts.indexOf('toggle');
+        const rulesIdx = parts.indexOf('rules');
+        let targetRuleId = '';
+        if (toggleIdx > 0) {
+          targetRuleId = parts[toggleIdx - 1];
+        } else if (rulesIdx !== -1 && rulesIdx + 1 < parts.length) {
+          targetRuleId = parts[rulesIdx + 1];
+        } else {
+          targetRuleId = parts[parts.length - 1];
+        }
+
+        let updated = false;
+        for (const dKey of Object.keys(store.rules)) {
+          const ruleList = store.rules[dKey];
+          if (Array.isArray(ruleList)) {
+            const ruleObj = ruleList.find(r => r.id === targetRuleId);
+            if (ruleObj) {
+              ruleObj.enabled = Boolean(body.enabled);
+              updated = true;
+              break;
+            }
+          }
+        }
+
+        if (updated) {
+          saveLocalStore(store);
+        }
+        return Promise.resolve({ success: true, message: `Rule toggled to ${body.enabled}` } as any);
       }
       if (method === 'DELETE') {
-        return Promise.resolve({ success: true } as any);
+        // Find rule ID from endpoint pattern: /automation/:deviceId/rules/:ruleId or /automation/rules/:ruleId
+        const parts = endpoint.split('/');
+        const rulesIdx = parts.indexOf('rules');
+        let targetRuleId = '';
+        if (rulesIdx !== -1 && rulesIdx + 1 < parts.length) {
+          targetRuleId = parts[rulesIdx + 1];
+        } else {
+          targetRuleId = parts[parts.length - 1];
+        }
+
+        let deleted = false;
+        for (const dKey of Object.keys(store.rules)) {
+          if (Array.isArray(store.rules[dKey])) {
+            const prevLen = store.rules[dKey].length;
+            store.rules[dKey] = store.rules[dKey].filter(r => r.id !== targetRuleId);
+            if (store.rules[dKey].length < prevLen) {
+              deleted = true;
+            }
+          }
+        }
+
+        if (deleted) {
+          saveLocalStore(store);
+        }
+        return Promise.resolve({ success: true, message: 'Rule deleted successfully' } as any);
       }
     }
 

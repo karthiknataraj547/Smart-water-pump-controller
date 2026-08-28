@@ -1016,9 +1016,20 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (action.equalsIgnoreCase("START") || action.equalsIgnoreCase("START_PUMP") || action.equalsIgnoreCase("ON")) {
         systemFault = false;
         digitalWrite(PIN_LED_FAULT, LOW);
-        pumpMode = "MANUAL"; // Explicit manual command from app switches to MANUAL mode
+        if (doc.containsKey("mode")) {
+            pumpMode = doc["mode"].as<String>();
+        } else if (doc["payload"].containsKey("mode")) {
+            pumpMode = doc["payload"]["mode"].as<String>();
+        } else if (initiator.indexOf("AUTO") != -1 || initiator.indexOf("RULE") != -1 || initiator.indexOf("SYSTEM_AUTOMATION") != -1) {
+            pumpMode = "AUTOMATIC";
+        }
         setPumpState(true, initiator.c_str(), cmdId.c_str());
     } else if (action.equalsIgnoreCase("STOP") || action.equalsIgnoreCase("STOP_PUMP") || action.equalsIgnoreCase("OFF")) {
+        if (doc.containsKey("mode")) {
+            pumpMode = doc["mode"].as<String>();
+        } else if (doc["payload"].containsKey("mode")) {
+            pumpMode = doc["payload"]["mode"].as<String>();
+        }
         setPumpState(false, initiator.c_str(), cmdId.c_str());
     } else if (action.equalsIgnoreCase("SET_MODE")) {
         pumpMode = doc["mode"] | doc["payload"]["mode"] | "AUTOMATIC";

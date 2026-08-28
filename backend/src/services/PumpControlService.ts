@@ -78,18 +78,29 @@ export class PumpControlService {
     });
 
     // Set pending transition state in database and broadcast to all connected clients
+    const isAutomation = params.source === 'automation' || params.requestedBy === 'SYSTEM_AUTOMATION';
+    const targetMode = payload.mode || (isAutomation ? 'AUTOMATIC' : undefined);
+
     if (params.commandType === 'START_PUMP') {
+      const modeToSet = targetMode || 'MANUAL';
       await db.execute(
-        `UPDATE pump_status SET pump_state = 'STARTING', mode = 'MANUAL', changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
-        [params.requestedBy, device.id]
+        `UPDATE pump_status SET pump_state = 'STARTING', mode = ?, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
+        [modeToSet, params.requestedBy, device.id]
       );
       const updatedStatus = await this.getPumpStatus(device.id);
       if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
     } else if (params.commandType === 'STOP_PUMP') {
-      await db.execute(
-        `UPDATE pump_status SET pump_state = 'STOPPING', changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
-        [params.requestedBy, device.id]
-      );
+      if (targetMode) {
+        await db.execute(
+          `UPDATE pump_status SET pump_state = 'STOPPING', mode = ?, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
+          [targetMode, params.requestedBy, device.id]
+        );
+      } else {
+        await db.execute(
+          `UPDATE pump_status SET pump_state = 'STOPPING', changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
+          [params.requestedBy, device.id]
+        );
+      }
       const updatedStatus = await this.getPumpStatus(device.id);
       if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
     } else if (params.commandType === 'EMERGENCY_STOP') {
@@ -121,7 +132,7 @@ export class PumpControlService {
       command_type: params.commandType,
       command: actionStr,
       action: actionStr,
-      mode: payload.mode,
+      mode: targetMode || payload.mode,
       auth_token: 'WPC_AUTH_SECURE_KEY_2026',
       source: params.source,
       payload,
