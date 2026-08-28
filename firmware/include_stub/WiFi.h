@@ -56,6 +56,9 @@ public:
     wl_status_t begin(const char* ssid, const char *passphrase = NULL) { return WL_CONNECTED; }
     wl_status_t status() { return WL_CONNECTED; }
     IPAddress localIP() { return IPAddress(); }
+    IPAddress gatewayIP() { return IPAddress(); }
+    IPAddress subnetMask() { return IPAddress(); }
+    IPAddress dnsIP(uint8_t dns_no = 0) { return IPAddress(); }
     String macAddress() { return "24:6F:28:A8:1F:29"; }
     int RSSI() { return -55; }
     int RSSI(int index) { return -55; }
@@ -68,6 +71,10 @@ public:
     bool softAP(const char* ssid, const char* passphrase = NULL, int channel = 1, int ssid_hidden = 0) { return true; }
     bool softAPdisconnect(bool wifioff = false) { return true; }
     IPAddress softAPIP() { return IPAddress(); }
+    bool setSleep(bool enable) { return true; }
+    bool setAutoReconnect(bool autoReconnect) { return true; }
+    bool config(IPAddress local_ip, IPAddress gateway, IPAddress subnet, IPAddress dns1 = IPAddress(), IPAddress dns2 = IPAddress()) { return true; }
+    int8_t waitForConnectResult(unsigned long timeoutLength = 60000) { return WL_CONNECTED; }
 };
 
 extern WiFiClass WiFi;

@@ -14,6 +14,7 @@ public:
     size_t putString(const char* key, const String value) { return value.length(); }
     size_t putString(const char* key, const char* value) { return String(value).length(); }
     String getString(const char* key, const String defaultValue = String()) { return defaultValue; }
+    String getString(const char* key, const char* defaultValue) { return defaultValue ? String(defaultValue) : String(); }
 
     // Integer
     size_t putInt(const char* key, int32_t value) { return 4; }
@@ -35,6 +36,7 @@ public:
     size_t putBytes(const char* key, const void* value, size_t len) { return len; }
     size_t getBytes(const char* key, void* buf, size_t maxLen) { return 0; }
 
+    bool isKey(const char* key) { return false; }
     bool remove(const char* key) { return true; }
 };
 

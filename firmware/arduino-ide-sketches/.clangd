@@ -6,6 +6,8 @@ CompileFlags:
     - "-DESP32"
     - "-I../include_stub"
     - "-I../../include_stub"
+    - "-Id:/Smart water pump conroller/firmware/include_stub"
+    - "-Wno-everything"
 Diagnostics:
   Suppress:
     - "*"

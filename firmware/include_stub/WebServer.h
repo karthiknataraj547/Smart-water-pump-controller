@@ -9,7 +9,9 @@
 #define PROGMEM
 #endif
 
-typedef void (*THandlerFunction)(void);
+#include <functional>
+
+typedef std::function<void(void)> THandlerFunction;
 
 enum HTTPMethod {
     HTTP_ANY     = 0,
@@ -28,14 +30,21 @@ public:
     void stop() {}
     void handleClient() {}
     void on(const String& uri, THandlerFunction handler) {}
+    void on(const char* uri, THandlerFunction handler) {}
+    void on(const String& uri, HTTPMethod method, THandlerFunction handler) {}
+    void on(const char* uri, HTTPMethod method, THandlerFunction handler) {}
     void on(const String& uri, int method, THandlerFunction handler) {}
+    void on(const char* uri, int method, THandlerFunction handler) {}
     void onNotFound(THandlerFunction handler) {}
     void send(int code, const char* contentType = "text/plain", const char* content = "") {}
     void send(int code, const char* contentType, const String& content) {}
     void send(int code, const String& contentType, const String& content) {}
     void sendHeader(const String& name, const String& value, bool first = false) {}
+    void sendHeader(const char* name, const char* value, bool first = false) {}
     String arg(const String& name) { return ""; }
+    String arg(const char* name) { return ""; }
     bool hasArg(const String& name) { return false; }
+    bool hasArg(const char* name) { return false; }
     String header(const String& name) { return ""; }
     String header(const char* name) { return ""; }
     bool hasHeader(const String& name) { return false; }

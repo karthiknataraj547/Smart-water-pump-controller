@@ -9,8 +9,12 @@ CompileFlags:
     - "-I../include_stub"
     - "-I../../include_stub"
     - "-I../../../include_stub"
+    - "-Id:/Smart water pump conroller/firmware/include_stub"
+    - "-Id:/Smart water pump conroller/firmware/esp32-main-node/include"
+    - "-Id:/Smart water pump conroller/firmware/esp8266-sub-node/include"
     - "-I./firmware/esp32-main-node/include"
     - "-I./firmware/esp8266-sub-node/include"
+    - "-Wno-everything"
 Diagnostics:
   Suppress:
     - "pp_file_not_found"
@@ -18,3 +22,4 @@ Diagnostics:
     - "drv_unable_to_handle_compilation"
     - "drv_expected_compiler_job"
     - "unused-includes"
+    - "macro-redefined"

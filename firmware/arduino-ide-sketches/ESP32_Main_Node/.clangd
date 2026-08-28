@@ -5,6 +5,10 @@ CompileFlags:
     - "-DARDUINO=10819"
     - "-DESP32"
     - "-I../../include_stub"
+    - "-Id:/Smart water pump conroller/firmware/include_stub"
+    - "-Id:/Smart water pump conroller/firmware/esp32-main-node/include"
+    - "-Wno-everything"
 Diagnostics:
   Suppress:
     - "*"
+

@@ -14,10 +14,19 @@ public:
     JsonVariant& operator=(const T& v) { return *this; }
 
     JsonVariant operator[](const char* key) const { return JsonVariant(); }
+    JsonVariant operator[](const String& key) const { return JsonVariant(); }
     JsonVariant operator[](int index) const { return JsonVariant(); }
+    JsonVariant operator[](size_t index) const { return JsonVariant(); }
 
     template<typename T>
     operator T() const { return T(); }
+
+    template<typename T>
+    T as() const { return T(); }
+
+    bool isNull() const { return false; }
+    bool containsKey(const char* key) const { return true; }
+    bool containsKey(const String& key) const { return true; }
 
     operator const char*() const { return ""; }
     operator String() const { return String(""); }
@@ -37,13 +46,17 @@ public:
     
     JsonVariant operator[](const char* key) const { return JsonVariant(); }
     JsonVariant operator[](const String& key) const { return JsonVariant(); }
-    bool containsKey(const char* key) const { return false; }
+    bool containsKey(const char* key) const { return true; }
+    bool containsKey(const String& key) const { return true; }
+    JsonObject createNestedObject(const char* key) { return JsonObject(); }
+    JsonArray createNestedArray(const char* key) { return JsonArray(); }
 };
 
 class JsonArray {
 public:
     JsonArray() {}
     JsonObject createNestedObject() { return JsonObject(); }
+    JsonArray createNestedArray() { return JsonArray(); }
     JsonVariant operator[](size_t index) const { return JsonVariant(); }
     size_t size() const { return 0; }
     template<typename T>
@@ -55,10 +68,17 @@ class StaticJsonDocument {
 public:
     StaticJsonDocument() {}
     
-    JsonObject as() { return JsonObject(); }
+    template<typename T>
+    T as() { return T(); }
+    
+    template<typename T>
+    T to() { return T(); }
     
     template<typename T>
     void set(T v) {}
+
+    bool containsKey(const char* key) const { return true; }
+    bool containsKey(const String& key) const { return true; }
 
     JsonArray createNestedArray(const char* key) { return JsonArray(); }
     JsonObject createNestedObject(const char* key) { return JsonObject(); }

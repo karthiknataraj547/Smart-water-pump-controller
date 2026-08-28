@@ -253,6 +253,14 @@ inline void xTaskCreatePinnedToCore(TaskFunction_t pvTaskCode, const char * cons
 class ESPClass {
 public:
     void restart() {}
+    uint32_t getFreeHeap() { return 200000; }
+    uint32_t getHeapSize() { return 320000; }
+    uint32_t getMinFreeHeap() { return 180000; }
+    uint32_t getMaxAllocHeap() { return 100000; }
+    uint32_t getCpuFreqMHz() { return 240; }
+    uint32_t getSdkVersion() { return 4; }
+    const char* getChipModel() { return "ESP32-D0WDQ6"; }
+    uint8_t getChipRevision() { return 1; }
 };
 extern ESPClass ESP;
 
