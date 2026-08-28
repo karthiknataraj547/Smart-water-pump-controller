@@ -1073,8 +1073,8 @@ void TaskSafetyLoop(void *parameter) {
             for (uint8_t i = 0; i < dynamicRuleCount; i++) {
                 if (!dynamicRules[i].enabled) continue;
 
-                // 1. Level Less Than Condition (e.g. Start < 30%)
-                if (isLevelValid && dynamicRules[i].level_lt > 0.0f && currentWaterLevel <= dynamicRules[i].level_lt) {
+                // 1. Level Less Than Condition (e.g. Start <= 30% or user configured threshold, even if level is 0%)
+                if (isLevelValid && dynamicRules[i].level_lt >= 0.0f && currentWaterLevel <= dynamicRules[i].level_lt) {
                     if (strcmp(dynamicRules[i].action, "START") == 0 && !pumpState) {
                         Serial.printf("[EDGE AUTO] ✓ Rule '%s' matched (Level %.1f%% <= %.1f%%) -> STARTING PUMP\n",
                             dynamicRules[i].rule_name, currentWaterLevel, dynamicRules[i].level_lt);
@@ -1083,10 +1083,10 @@ void TaskSafetyLoop(void *parameter) {
                     }
                 }
 
-                // 2. Level Greater Than Condition (e.g. Stop >= 95%)
-                if (isLevelValid && dynamicRules[i].level_gt > 0.0f && currentWaterLevel >= dynamicRules[i].level_gt) {
+                // 2. Level Greater Than Condition (e.g. Stop >= 99% or exact user configured threshold)
+                if (isLevelValid && dynamicRules[i].level_gt >= 0.0f && currentWaterLevel >= dynamicRules[i].level_gt) {
                     if (strcmp(dynamicRules[i].action, "STOP") == 0 && pumpState) {
-                        Serial.printf("[EDGE AUTO] ✓ Rule '%s' matched (Level %.1f%% >= %.1f%%) -> STOPPING PUMP (Tank Full)\n",
+                        Serial.printf("[EDGE AUTO] ✓ Rule '%s' matched (Level %.1f%% >= %.1f%%) -> STOPPING PUMP (User Threshold Reached)\n",
                             dynamicRules[i].rule_name, currentWaterLevel, dynamicRules[i].level_gt);
                         setPumpState(false, dynamicRules[i].rule_name);
                         break;

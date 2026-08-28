@@ -24,8 +24,11 @@ export const PumpControlCard: React.FC = () => {
   const currentAmps = Number(pumpStatus?.current_draw_amps) || 0;
   const currentWaterLevel = isDeviceOnline ? Number(telemetry?.water_level_percentage ?? 0) : 0;
 
-  // Maximum water level off threshold for automation
-  const autoCutoffThreshold = 95.0;
+  // Maximum water level off threshold dynamically resolved from user's autonomous rules
+  const activeStopRule = rules.find(r => r.enabled && ((r.condition_json as any)?.level_gt !== undefined || (r.condition_json as any)?.level_gte !== undefined));
+  const autoCutoffThreshold = activeStopRule 
+    ? Number((activeStopRule.condition_json as any).level_gt ?? (activeStopRule.condition_json as any).level_gte) 
+    : 100.0;
   const isTankFullInAuto = currentMode === 'AUTOMATIC' && currentWaterLevel >= autoCutoffThreshold;
   const isStartDisabled = !isDeviceOnline || isRunning || isTankFullInAuto;
   const isStopDisabled = !isDeviceOnline || !isRunning;

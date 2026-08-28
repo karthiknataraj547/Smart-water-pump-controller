@@ -110,23 +110,10 @@ export class AutomationEngine {
       }
 
       // =====================================================================
-      // 1. SAFETY CRITICAL RULES (Enforced in ALL modes)
+      // 1. SAFETY CRITICAL RULES (Physical Protection)
       // =====================================================================
 
-      // Safety Rule 1: High Water Overflow Cutoff (>= 95%)
-      if (isWaterLevelValid && currentWaterLevel >= 95.0 && isPumpRunning) {
-        console.log(`[Automation Safety] Tank Full (${currentWaterLevel}% >= 95%). Triggering Auto-Stop.`);
-        await this.executePumpAction(targetId, 'STOP', `Safety Auto-Stop: Tank level >= 95% (${currentWaterLevel.toFixed(1)}%)`);
-        await alertService.createAlert({
-          deviceId: targetId,
-          severity: 'info',
-          title: 'Tank Full Auto-Stop',
-          message: `Water pump stopped automatically at ${currentWaterLevel.toFixed(1)}% full level.`
-        });
-        return;
-      }
-
-      // Safety Rule 2: Dry-Run Inflow Detection (Zero Flow after 2 min)
+      // Dry-Run Inflow Protection (Zero Flow while running > 120 sec)
       if (isPumpRunning && (pumpStatus.runtime_seconds || 0) > 120 && telemetry.flow_rate_lpm < 0.5 && subnodeOnline) {
         console.warn(`[Automation Safety] DRY RUN DETECTED! Zero flow (${telemetry.flow_rate_lpm} LPM) after 2 min runtime.`);
         await this.executePumpAction(targetId, 'EMERGENCY_STOP', 'Emergency Stop: Borewell Dry Run (Zero Inflow)');
@@ -140,7 +127,7 @@ export class AutomationEngine {
       }
 
       // =====================================================================
-      // 2. AUTOMATIC MODE CONTROL (Strictly executed when mode === 'AUTOMATIC')
+      // 2. AUTOMATIC MODE CONTROL (Strictly governed by user-defined rules)
       // =====================================================================
       if (currentMode === 'AUTOMATIC') {
         // Query active custom automation rules configured by the user
@@ -157,7 +144,8 @@ export class AutomationEngine {
             const action = typeof rule.action_json === 'string' ? JSON.parse(rule.action_json) : rule.action_json;
             const targetAction = (action.pump_action || action.action || '').toUpperCase();
 
-            // A) Low Level Threshold Check (e.g. level_lt: 30 or level_lte: 30) -> START PUMP
+            // A) Low Level Threshold Check (e.g. level_lt: 30 or user value) -> START PUMP
+            // Starts pump when water level <= threshold, even if tank level is 0%
             const lowThreshold = condition.level_lt !== undefined ? Number(condition.level_lt) :
                                  condition.level_lte !== undefined ? Number(condition.level_lte) :
                                  condition.level_min !== undefined ? Number(condition.level_min) : undefined;
@@ -180,7 +168,8 @@ export class AutomationEngine {
               }
             }
 
-            // B) High Level Threshold Check (e.g. level_gt: 95 or level_gte: 95) -> STOP PUMP
+            // B) High Level Threshold Check (e.g. level_gt: 99 or user decided value) -> STOP PUMP
+            // Strictly stops pump when water level >= user defined threshold
             const highThreshold = condition.level_gt !== undefined ? Number(condition.level_gt) :
                                   condition.level_gte !== undefined ? Number(condition.level_gte) :
                                   condition.level_max !== undefined ? Number(condition.level_max) : undefined;
@@ -207,20 +196,14 @@ export class AutomationEngine {
           }
         }
 
-        // C) Strict Default Fallback if no specific custom rules matched
-        if (!ruleExecuted && isWaterLevelValid) {
-          if (isPumpOff && currentWaterLevel <= 30.0 && currentWaterLevel > 0.0) {
+        // C) Fallback only if NO rules are configured in the system at all
+        if (!ruleExecuted && rules.length === 0 && isWaterLevelValid) {
+          if (isPumpOff && currentWaterLevel <= 30.0) {
             console.log(`[Automation Default] Tank level (${currentWaterLevel.toFixed(1)}% <= 30%). Dispatching real START command.`);
             await this.executePumpAction(targetId, 'START', `Default Auto-Start: Low level (${currentWaterLevel.toFixed(1)}% <= 30%)`);
-            await alertService.createAlert({
-              deviceId: targetId,
-              severity: 'info',
-              title: 'Low Water Auto-Start',
-              message: `Water pump started automatically because tank level dropped to ${currentWaterLevel.toFixed(1)}%.`
-            });
-          } else if (isPumpRunning && currentWaterLevel >= 95.0) {
-            console.log(`[Automation Default] Tank full (${currentWaterLevel.toFixed(1)}% >= 95%). Dispatching real STOP command.`);
-            await this.executePumpAction(targetId, 'STOP', `Default Auto-Stop: Tank full (${currentWaterLevel.toFixed(1)}% >= 95%)`);
+          } else if (isPumpRunning && currentWaterLevel >= 100.0) {
+            console.log(`[Automation Default] Tank 100% full. Dispatching real STOP command.`);
+            await this.executePumpAction(targetId, 'STOP', `Default Auto-Stop: Tank full 100%`);
           }
         }
       }
