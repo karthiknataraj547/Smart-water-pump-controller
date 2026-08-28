@@ -24,9 +24,9 @@ export const UserApp: React.FC = () => {
   const [otaStatus, setOtaStatus] = useState<string>('');
 
   const isRunning = isDeviceOnline && pumpStatus?.pump_state === 'ON';
-  const waterPct = Number(telemetry?.water_level_percentage ?? 0);
-  const volumeLiters = Number(telemetry?.water_level_liters ?? (waterPct * 20));
-  const inflowRate = Number(telemetry?.inflow_rate_lpm ?? 0);
+  const waterPct = isDeviceOnline ? Number(telemetry?.water_level_percentage ?? 0) : 0;
+  const volumeLiters = isDeviceOnline ? Number(telemetry?.water_level_liters ?? (waterPct * 20)) : 0;
+  const inflowRate = isDeviceOnline ? Number(telemetry?.inflow_rate_lpm ?? 0) : 0;
   const unackAlerts = alerts.filter(a => !a.acknowledged).length;
 
   const triggerOtaUpdate = async () => {

@@ -156,8 +156,8 @@ float readTdsPpm(float waterTempC = 25.0) {
     int rawAdc = analogRead(PIN_TDS);
     float voltage = (rawAdc / 1024.0) * 3.3;
 
-    // Floating pin guard (0V or no sensor connected)
-    if (voltage < 0.1) return 145.0; // Default clean water benchmark
+    // Floating pin guard (0V or no sensor connected) -> Strict 0 ppm
+    if (voltage < 0.05) return 0.0;
 
     float compensationCoefficient = 1.0 + 0.02 * (waterTempC - 25.0);
     float compensationVoltage = voltage / compensationCoefficient;
@@ -182,8 +182,8 @@ void setup() {
     Serial.begin(115200);
     delay(300);
     Serial.println("\n==================================================");
-    Serial.println("  AQUACONTROL — ESP8266 TANK SUB NODE v2.2.0");
-    Serial.println("  Ultra-Fast 200ms High-Speed Real-Time Sync");
+    Serial.println("  AQUACONTROL — ESP8266 TANK SUB NODE v2.3.0");
+    Serial.println("  Strict Hardware Telemetry (Zero Fallback / 200ms)");
     Serial.println("==================================================");
 
     pinMode(PIN_TRIG, OUTPUT);
@@ -244,22 +244,13 @@ void loop() {
             if (levelPercentage < 0.0) levelPercentage = 0.0;
             waterLiters = (levelPercentage / 100.0) * TANK_CAPACITY_LITERS;
         } else {
-            // Bench Testing Simulation Fallback (when HC-SR04 is unplugged on test desk)
-            static float simLevel = 65.0f;
-            static bool simDirection = true;
-            if (simDirection) {
-                simLevel += 0.06f;
-                if (simLevel >= 88.0f) simDirection = false;
-            } else {
-                simLevel -= 0.04f;
-                if (simLevel <= 35.0f) simDirection = true;
-            }
-            levelPercentage = simLevel;
-            waterLiters = (levelPercentage / 100.0f) * TANK_CAPACITY_LITERS;
+            // Strict Zero: If sensor is not returning data or unplugged, report exactly 0.0
+            levelPercentage = 0.0f;
+            waterLiters = 0.0f;
         }
 
         // Sample TDS
-        float tdsPpm = readTdsPpm(24.0);
+        float tdsPpm = readTdsPpm(24.5);
 
         // Prepare Binary Telemetry Packet (35 Bytes)
         TankTelemetryPacket packet;

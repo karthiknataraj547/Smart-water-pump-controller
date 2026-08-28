@@ -17,17 +17,20 @@ export const PumpControlCard: React.FC = () => {
     isDeviceOnline
   } = useDevice();
 
+  const isStarting = isDeviceOnline && pumpStatus?.pump_state === 'STARTING';
+  const isStopping = isDeviceOnline && pumpStatus?.pump_state === 'STOPPING';
   const isRunning = isDeviceOnline && pumpStatus?.pump_state === 'ON';
   const isFault = isDeviceOnline && pumpStatus?.pump_state === 'FAULT';
   const currentMode = pumpStatus?.mode || 'AUTOMATIC';
   const runtimeSec = Number(pumpStatus?.runtime_seconds) || 0;
   const currentAmps = Number(pumpStatus?.current_draw_amps) || 0;
-  const currentWaterLevel = Number(telemetry?.water_level_percentage ?? 0);
+  const currentWaterLevel = isDeviceOnline ? Number(telemetry?.water_level_percentage ?? 0) : 0;
 
   // Maximum water level off threshold for automation
   const autoCutoffThreshold = 95.0;
   const isTankFullInAuto = currentMode === 'AUTOMATIC' && currentWaterLevel >= autoCutoffThreshold;
-  const isStartDisabled = !isDeviceOnline || commandPending || isRunning || isTankFullInAuto;
+  const isStartDisabled = !isDeviceOnline || commandPending || isRunning || isStarting || isTankFullInAuto;
+  const isStopDisabled = !isDeviceOnline || commandPending || (!isRunning && !isStarting) || isStopping;
 
   // Format runtime to HH:MM:SS
   const formatRuntime = (totalSec: number) => {
@@ -60,15 +63,45 @@ export const PumpControlCard: React.FC = () => {
           <div className="flex items-center space-x-2.5 neu-inset px-4 py-2 rounded-xl">
             <span
               className={`w-2.5 h-2.5 rounded-full neu-dot ${
-                !isDeviceOnline ? 'neu-dot-rose' : isFault ? 'neu-dot-rose animate-pulse' : isRunning ? 'neu-dot-emerald animate-pulse' : 'bg-slate-500'
+                !isDeviceOnline
+                  ? 'neu-dot-rose'
+                  : isFault
+                  ? 'neu-dot-rose animate-pulse'
+                  : isStarting
+                  ? 'neu-dot-amber animate-pulse'
+                  : isStopping
+                  ? 'neu-dot-amber animate-pulse'
+                  : isRunning
+                  ? 'neu-dot-emerald animate-pulse'
+                  : 'bg-slate-500'
               }`}
             />
             <span
               className={`text-xs font-bold tracking-widest font-mono uppercase ${
-                !isDeviceOnline ? 'text-rose-400 font-black' : isFault ? 'text-rose-400' : isRunning ? 'text-emerald-400' : 'text-slate-400'
+                !isDeviceOnline
+                  ? 'text-rose-400 font-black'
+                  : isFault
+                  ? 'text-rose-400'
+                  : isStarting
+                  ? 'text-amber-400 animate-pulse font-black'
+                  : isStopping
+                  ? 'text-amber-400 animate-pulse font-black'
+                  : isRunning
+                  ? 'text-emerald-400'
+                  : 'text-slate-400'
               }`}
             >
-              {!isDeviceOnline ? 'HARDWARE UNPOWERED / OFFLINE' : isFault ? 'FAULT / LOCKOUT' : isRunning ? 'RUNNING' : 'STANDBY'}
+              {!isDeviceOnline
+                ? 'HARDWARE UNPOWERED / OFFLINE'
+                : isFault
+                ? 'FAULT / LOCKOUT'
+                : isStarting
+                ? 'TRYING TO TURN ON...'
+                : isStopping
+                ? 'TRYING TO TURN OFF...'
+                : isRunning
+                ? 'RUNNING'
+                : 'STANDBY'}
             </span>
           </div>
         </div>
@@ -94,7 +127,7 @@ export const PumpControlCard: React.FC = () => {
             </div>
             <div className="flex items-baseline space-x-1.5">
               <span className="text-3xl font-extrabold text-amber-400 tracking-wider">
-                {isDeviceOnline ? (Number(currentAmps) || 0).toFixed(1) : '0.0'}
+                {isDeviceOnline && isRunning ? (Number(currentAmps) || 0).toFixed(1) : '0.0'}
               </span>
               <span className="text-xs font-mono font-bold text-amber-400/80">AMPS</span>
             </div>
@@ -140,30 +173,40 @@ export const PumpControlCard: React.FC = () => {
             className={`py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 transition-all ${
               isRunning
                 ? 'opacity-40 cursor-not-allowed neu-inset text-slate-500'
+                : isStarting
+                ? 'neu-inset text-amber-400 border border-amber-500/50 cursor-wait animate-pulse'
                 : isTankFullInAuto
                 ? 'opacity-60 cursor-not-allowed neu-inset text-amber-400 border border-amber-500/30'
                 : 'neu-btn neu-btn-success cursor-pointer'
             }`}
           >
-            {isTankFullInAuto ? <Lock className="w-5 h-5 text-amber-400" /> : <Power className="w-5 h-5" />}
+            {isTankFullInAuto ? (
+              <Lock className="w-5 h-5 text-amber-400" />
+            ) : isStarting ? (
+              <Zap className="w-5 h-5 text-amber-400 animate-spin" />
+            ) : (
+              <Power className="w-5 h-5" />
+            )}
             <span className="text-sm font-extrabold tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
-              {isTankFullInAuto ? 'AUTO CUTOFF' : 'START PUMP'}
+              {isTankFullInAuto ? 'AUTO CUTOFF' : isStarting ? 'TRYING TO TURN ON...' : 'START PUMP'}
             </span>
           </button>
 
           <button
             type="button"
-            disabled={commandPending || !isRunning}
+            disabled={isStopDisabled}
             onClick={stopPump}
             className={`py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 transition-all ${
-              !isRunning
+              isStopping
+                ? 'neu-inset text-amber-400 border border-amber-500/50 cursor-wait animate-pulse'
+                : !isRunning
                 ? 'opacity-40 cursor-not-allowed neu-inset text-slate-500'
                 : 'neu-btn neu-btn-danger cursor-pointer'
             }`}
           >
             <Power className="w-5 h-5 rotate-180" />
             <span className="text-sm font-extrabold tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
-              STOP PUMP
+              {isStopping ? 'TRYING TO TURN OFF...' : 'STOP PUMP'}
             </span>
           </button>
         </div>

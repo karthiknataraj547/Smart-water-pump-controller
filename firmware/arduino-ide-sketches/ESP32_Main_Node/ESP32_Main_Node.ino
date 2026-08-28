@@ -1107,13 +1107,12 @@ void TaskNetworkLoop(void *parameter) {
                     lastTelemetryPublish = millis();
                     packetCounter++;
 
-                    // If no subnode telemetry received, provide realistic fallback level
-                    if (!subNodeConnected && latestTankData.water_level_pct <= 0.0f) {
-                        latestTankData.water_level_pct = 75.0f;
-                        latestTankData.water_liters = 1500.0f;
-                        latestTankData.flow_rate_lpm = pumpState ? 24.5f : 0.0f;
-                        latestTankData.tds_ppm = 135.0f;
-                        latestTankData.temperature_c = 26.5f;
+                    // If no subnode telemetry received, provide strict 0.0 (No fake simulation numbers)
+                    if (!subNodeConnected) {
+                        latestTankData.water_level_pct = 0.0f;
+                        latestTankData.water_liters = 0.0f;
+                        latestTankData.flow_rate_lpm = 0.0f;
+                        latestTankData.tds_ppm = 0.0f;
                     }
 
                     StaticJsonDocument<512> doc;

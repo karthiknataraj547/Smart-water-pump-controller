@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { Device, PumpStatus, SensorReading, Alert, AutomationRule } from '../types';
+import { Device, PumpStatus, PumpState, SensorReading, Alert, AutomationRule } from '../types';
 import { ApiService, getCustomGatewayUrl } from '../services/api';
 import { useAuth } from './AuthContext';
 import mqtt, { MqttClient } from 'mqtt';
@@ -168,193 +168,188 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // CLOUD MQTT DIRECT WEBSOCKET CONNECTION (wss://broker.emqx.io:8084/mqtt)
   // =========================================================================
   useEffect(() => {
-    const brokerWsUrl = 'wss://broker.emqx.io:8084/mqtt';
-    console.log('[MQTT] Connecting browser MQTT client to:', brokerWsUrl);
+    const connectMqtt = () => {
+      const brokerWsUrl = 'wss://broker.emqx.io:8084/mqtt';
+      console.log('[MQTT] Connecting browser MQTT client to:', brokerWsUrl);
 
-    try {
-      const client = mqtt.connect(brokerWsUrl, {
-        clientId: `AquaControl_Web_${Math.random().toString(16).substring(2, 8)}`,
-        username: 'WPC-A81F29',
-        password: 'WPC_AUTH_SECURE_KEY_2026',
-        reconnectPeriod: 2000,
-        connectTimeout: 8000,
-        keepalive: 30
-      });
-      mqttClientRef.current = client;
+      try {
+        const client = mqtt.connect(brokerWsUrl, {
+          clientId: `AquaControl_Web_${Math.random().toString(16).substring(2, 8)}`,
+          username: 'WPC-A81F29',
+          password: 'WPC_AUTH_SECURE_KEY_2026',
+          reconnectPeriod: 2000,
+          connectTimeout: 8000,
+          keepalive: 30
+        });
+        mqttClientRef.current = client;
 
-      client.on('connect', () => {
-        console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to AquaControl topics...');
-        setMqttConnected(true);
-        client.subscribe('aquacontrol/WPC-A81F29/#');
-        client.subscribe('aquacontrol/v1/devices/WPC-A81F29/#');
-        client.subscribe('devices/WPC-A81F29/#');
-        client.subscribe('devices/+/telemetry');
-        client.subscribe('devices/+/ack');
-        client.subscribe('devices/+/status');
-        client.subscribe('aquacontrol/telemetry');
-        client.subscribe('aquacontrol/status');
-        client.subscribe('aquacontrol/ack');
-      });
+        client.on('connect', () => {
+          console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to AquaControl topics...');
+          setMqttConnected(true);
+          client.subscribe('aquacontrol/WPC-A81F29/#');
+          client.subscribe('aquacontrol/v1/devices/WPC-A81F29/#');
+          client.subscribe('devices/WPC-A81F29/#');
+          client.subscribe('devices/+/telemetry');
+          client.subscribe('devices/+/ack');
+          client.subscribe('devices/+/status');
+          client.subscribe('aquacontrol/telemetry');
+          client.subscribe('aquacontrol/status');
+          client.subscribe('aquacontrol/ack');
+        });
 
-      client.on('message', (topic: string, message: Buffer) => {
-        try {
-          const payloadStr = message.toString();
-          const data = JSON.parse(payloadStr);
+        client.on('message', (topic: string, message: Buffer) => {
+          try {
+            const payloadStr = message.toString();
+            const data = JSON.parse(payloadStr);
 
-          // STRICT FILTER: Discard public messages from other strangers' devices
-          const isOurDevice = topic.includes('WPC-A81F29') || 
-                              topic.startsWith('aquacontrol') || 
-                              data.device_uid === 'WPC-A81F29' || 
-                              data.deviceUid === 'WPC-A81F29';
+            // STRICT FILTER: Discard public messages from other strangers' devices
+            const isOurDevice = topic.includes('WPC-A81F29') || 
+                                topic.startsWith('aquacontrol') || 
+                                data.device_uid === 'WPC-A81F29' || 
+                                data.deviceUid === 'WPC-A81F29';
 
-          if (!isOurDevice) return;
+            if (!isOurDevice) return;
 
-          console.log(`%c[AquaControl LIVE HW] Topic: '${topic}'`, 'color: #10b981; font-weight: bold;', data);
+            console.log(`%c[AquaControl LIVE HW] Topic: '${topic}'`, 'color: #10b981; font-weight: bold;', data);
 
-          let deviceUid = data.device_uid || data.deviceUid || 'WPC-A81F29';
-          let subTopic = '';
+            let deviceUid = data.device_uid || data.deviceUid || 'WPC-A81F29';
+            let subTopic = '';
 
-          const parts = topic.split('/');
-          if (parts[0] === 'devices') {
-            if (parts.length === 2) {
-              subTopic = parts[1];
-            } else if (parts.length >= 3) {
-              deviceUid = parts[1];
-              subTopic = parts[2];
+            const parts = topic.split('/');
+            if (parts[0] === 'devices') {
+              if (parts.length === 2) {
+                subTopic = parts[1];
+              } else if (parts.length >= 3) {
+                deviceUid = parts[1];
+                subTopic = parts[2];
+              }
+            } else if (parts[0] === 'aquacontrol') {
+              if (parts.length >= 5) {
+                deviceUid = parts[3];
+                subTopic = parts[4];
+              } else if (parts.length >= 2) {
+                subTopic = parts[parts.length - 1];
+              }
             }
-          } else if (parts[0] === 'aquacontrol') {
-            if (parts.length >= 5) {
-              deviceUid = parts[3];
-              subTopic = parts[4];
-            } else if (parts.length >= 2) {
-              subTopic = parts[parts.length - 1];
+
+            // Fallback inference if payload contains specific fields
+            if (!subTopic) {
+              if (data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
+                subTopic = 'telemetry';
+              } else if (data.confirmed_state !== undefined || data.pump_state !== undefined) {
+                subTopic = 'ack';
+              } else if (data.status !== undefined) {
+                subTopic = 'status';
+              }
             }
-          }
 
-          // Fallback inference if payload contains specific fields
-          if (!subTopic) {
-            if (data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
-              subTopic = 'telemetry';
-            } else if (data.confirmed_state !== undefined || data.pump_state !== undefined) {
-              subTopic = 'ack';
-            } else if (data.status !== undefined) {
-              subTopic = 'status';
-            }
-          }
+            if (subTopic === 'telemetry' || data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
+              const now = Date.now();
+              setLastTelemetryTimestamp(now);
+              setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
+              setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
 
-          if (subTopic === 'telemetry' || data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
-            const now = Date.now();
-            setLastTelemetryTimestamp(now);
-            setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
-            setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
+              const waterPct = Number(data.water_level_percentage ?? data.water_level_pct ?? data.waterLevelPercentage ?? 0);
+              const waterLiters = Number(data.water_level_liters ?? data.waterLevelLiters ?? (waterPct * 20));
+              const flowRate = Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? data.inflowRateLpm ?? 0);
+              const totalLiters = Number(data.total_inflow_liters ?? data.total_inflow_l ?? data.totalInflowLiters ?? 0);
+              const tds = Number(data.tds_ppm ?? data.tdsPpm ?? 0);
+              const temp = Number(data.temperature_c ?? data.temperatureC ?? 25);
+              const status = data.sensor_status || data.sensorStatus || 'HEALTHY';
 
-            const waterPct = Number(data.water_level_percentage ?? data.water_level_pct ?? data.waterLevelPercentage ?? 0);
-            const waterLiters = Number(data.water_level_liters ?? data.waterLevelLiters ?? (waterPct * 20));
-            const flowRate = Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? data.inflowRateLpm ?? 0);
-            const totalLiters = Number(data.total_inflow_liters ?? data.total_inflow_l ?? data.totalInflowLiters ?? 0);
-            const tds = Number(data.tds_ppm ?? data.tdsPpm ?? 0);
-            const temp = Number(data.temperature_c ?? data.temperatureC ?? 25);
-            const status = data.sensor_status || data.sensorStatus || 'HEALTHY';
+              setTelemetry({
+                id: `tel_${now}`,
+                device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                water_level_percentage: waterPct,
+                water_level_liters: waterLiters,
+                inflow_rate_lpm: flowRate,
+                total_inflow_liters: totalLiters,
+                tds_ppm: tds,
+                temperature_c: temp,
+                sensor_status: status,
+                created_at: new Date(now).toISOString()
+              });
+              if (typeof data.pump_running === 'boolean' || data.pump_state) {
+                const isRunning = data.pump_running === true || data.pump_state === 'ON';
+                setPumpStatus(prev => {
+                  const newState: PumpState = isRunning ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
+                  if (prev?.pump_state === 'STARTING' && !isRunning) {
+                    return prev;
+                  }
+                  return {
+                    ...(prev || {
+                      id: 'ps_live',
+                      device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                      mode: data.pump_mode || 'AUTOMATIC',
+                      runtime_seconds: 0,
+                      changed_at: new Date().toISOString(),
+                      changed_by: 'HARDWARE_TELEMETRY'
+                    }),
+                    pump_state: newState,
+                    mode: (data.pump_mode || prev?.mode || 'AUTOMATIC') as any,
+                    current_draw_amps: Number(data.current_amps ?? (isRunning ? 4.8 : 0.0)),
+                    runtime_seconds: Number(data.runtime_seconds ?? prev?.runtime_seconds ?? 0)
+                  };
+                });
 
-            setTelemetry({
-              id: `tel_${now}`,
-              device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-              water_level_percentage: waterPct,
-              water_level_liters: waterLiters,
-              inflow_rate_lpm: flowRate,
-              total_inflow_liters: totalLiters,
-              tds_ppm: tds,
-              temperature_c: temp,
-              sensor_status: status,
-              created_at: new Date(now).toISOString()
-            });
-
-            if (typeof data.pump_running === 'boolean' || data.pump_state) {
-              const isRunning = data.pump_running === true || data.pump_state === 'ON';
+                if (isRunning) {
+                  setCommandPending(false);
+                }
+              }
+            } else if (subTopic === 'ack') {
+              const confirmedState: PumpState = data.confirmed_state === 'ON' ? 'ON' : (data.confirmed_state === 'EMERGENCY_STOP' ? 'FAULT' : 'OFF');
               setPumpStatus(prev => ({
                 ...(prev || {
                   id: 'ps_live',
                   device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                  mode: data.pump_mode || 'AUTOMATIC',
+                  mode: 'AUTOMATIC',
                   runtime_seconds: 0,
                   changed_at: new Date().toISOString(),
-                  changed_by: 'HARDWARE_TELEMETRY'
+                  changed_by: 'HARDWARE_ACK'
                 }),
-                pump_state: isRunning ? 'ON' : 'OFF',
-                mode: (data.pump_mode || prev?.mode || 'AUTOMATIC') as any,
-                current_draw_amps: Number(data.current_amps ?? (isRunning ? 4.8 : 0.0)),
+                pump_state: confirmedState,
+                current_draw_amps: Number(data.current_amps ?? (confirmedState === 'ON' ? 4.8 : 0.0)),
                 runtime_seconds: Number(data.runtime_seconds ?? prev?.runtime_seconds ?? 0)
               }));
+              setCommandPending(false);
+              setCommandStatusText(`Hardware Verified: Pump is ${confirmedState} ✓`);
+              setTimeout(() => setCommandStatusText(''), 3000);
+            } else if (subTopic === 'status') {
+              const isOnline = data.status === 'online';
+              if (isOnline) {
+                setLastTelemetryTimestamp(Date.now());
+                setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
+                setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
+                if (data.pump_state) {
+                  const hwState: PumpState = data.pump_state === 'ON' ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
+                  setPumpStatus(prev => prev ? { ...prev, pump_state: hwState } : null);
+                }
+              } else {
+                setSelectedDevice(prev => prev ? { ...prev, status: 'offline' } : prev);
+                setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'offline' } : d));
+              }
             }
-          } else if (subTopic === 'ack') {
-            const confirmedState = data.confirmed_state || data.pump_state || (data.status === 'SUCCESS' || data.status === 'successful' ? 'ON' : 'OFF');
-            setPumpStatus(prev => ({
-              ...(prev || {
-                id: 'ps_live',
-                device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                mode: 'AUTOMATIC',
-                runtime_seconds: 0,
-                changed_at: new Date().toISOString(),
-                changed_by: 'HARDWARE_ACK'
-              }),
-              pump_state: confirmedState === 'ON' ? 'ON' : confirmedState === 'EMERGENCY_STOP' ? 'FAULT' : 'OFF',
-              current_draw_amps: Number(data.current_amps ?? (confirmedState === 'ON' ? 4.8 : 0.0)),
-              runtime_seconds: Number(data.runtime_seconds ?? prev?.runtime_seconds ?? 0)
-            }));
-            setCommandPending(false);
-            setCommandStatusText(`Hardware Confirmed: ${confirmedState}`);
-            setTimeout(() => setCommandStatusText(''), 2500);
-          } else if (subTopic === 'status') {
-            const isOnline = data.status === 'online';
-            if (isOnline) {
-              setLastTelemetryTimestamp(Date.now());
-            } else {
-              setLastTelemetryTimestamp(0);
-            }
-            const st = isOnline ? 'online' : 'offline';
-            setSelectedDevice(prev => prev ? { ...prev, status: st } : prev);
-            setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: st } : d));
-          } else if (subTopic === 'alerts') {
-            if (data.alert_type || data.title || data.message) {
-              const sev = (data.severity || 'warning').toLowerCase() as 'info' | 'warning' | 'critical';
-              setAlerts(prev => [{
-                id: `alt_${Date.now()}`,
-                device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                title: data.title || data.alert_type || 'Hardware Alert',
-                severity: (sev === 'critical' || sev === 'info') ? sev : 'warning',
-                message: data.message || 'Hardware alert condition triggered',
-                acknowledged: false,
-                created_at: new Date().toISOString()
-              }, ...prev]);
-            }
+          } catch (err) {
+            console.warn('[MQTT Client] Error processing message payload:', err);
           }
-        } catch (e) {
-          console.warn('[MQTT] Inbound message parsing error:', e);
-        }
-      });
+        });
+      } catch (err) {
+        console.warn('[MQTT Client] Init error:', err);
+      }
+    };
 
-      client.on('error', (err) => {
-        console.warn('[MQTT] Browser MQTT client error:', err.message);
-      });
-
-      client.on('close', () => {
-        setMqttConnected(false);
-      });
-    } catch (e) {
-      console.warn('[MQTT] Could not initialize browser MQTT client:', e);
-    }
+    connectMqtt();
 
     return () => {
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (mqttClientRef.current) {
         mqttClientRef.current.end(true);
         mqttClientRef.current = null;
       }
     };
-  }, []);
+  }, [token]);
 
-  // =========================================================================
-  // LOCAL GATEWAY WEBSOCKET CONNECTION
-  // =========================================================================
+  // Local Gateway WebSocket Connection (Dual-Path Ingestion)
   const connectWs = useCallback(() => {
     const wsUrl = getWsUrl(token);
     if (!wsUrl) {
@@ -399,11 +394,6 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [token]);
 
-  const reconnectWs = useCallback(async () => {
-    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-    connectWs();
-  }, [connectWs]);
-
   useEffect(() => {
     connectWs();
     return () => {
@@ -417,12 +407,15 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [connectWs]);
 
-  const handleWebSocketMessage = (msg: any) => {
+  // WebSocket Inbound Message Handler
+  const handleWebSocketMessage = (msg: { event: string; data: any }) => {
     const { event, data } = msg;
 
-    if (event === 'DEVICE_STATUS_CHANGED') {
+    if (event === 'DEVICE_STATUS' || event === 'DEVICE_STATUS_CHANGED') {
       const { deviceId, deviceUid, status } = data;
-      setDevices(prev => prev.map(d => (d.id === deviceId || d.device_uid === deviceUid) ? { ...d, status } : d));
+      setDevices(prev =>
+        prev.map(d => (d.id === deviceId || d.device_uid === deviceUid ? { ...d, status } : d))
+      );
       setSelectedDevice(prev => {
         if (!prev) return prev;
         if (prev.id === deviceId || prev.device_uid === deviceUid) {
@@ -433,7 +426,6 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       if (status === 'offline') {
         setLastTelemetryTimestamp(0);
-        // Retain last known telemetry metrics so gauges remain readable
       }
     } else if (event === 'TELEMETRY_UPDATE') {
       setLastTelemetryTimestamp(Date.now());
@@ -444,32 +436,41 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setTelemetry({
           id: data.readingId || 'latest',
           device_id: data.deviceId || selectedDevice?.id || '',
-          water_level_percentage: data.waterLevelPercentage,
-          water_level_liters: data.waterLevelLiters,
-          inflow_rate_lpm: data.inflowRateLpm,
-          total_inflow_liters: data.totalInflowLiters,
-          tds_ppm: data.tdsPpm,
-          temperature_c: data.temperatureC,
+          water_level_percentage: Number(data.waterLevelPercentage ?? 0),
+          water_level_liters: Number(data.waterLevelLiters ?? 0),
+          inflow_rate_lpm: Number(data.inflowRateLpm ?? 0),
+          total_inflow_liters: Number(data.totalInflowLiters ?? 0),
+          tds_ppm: Number(data.tdsPpm ?? 0),
+          temperature_c: Number(data.temperatureC ?? 25),
           sensor_status: data.sensorStatus || 'HEALTHY',
           created_at: data.timestamp || new Date().toISOString()
         });
 
         if (data.pumpState !== undefined || typeof data.pumpRunning === 'boolean') {
           const isRunning = data.pumpRunning === true || data.pumpState === 'ON';
-          setPumpStatus(prev => ({
-            ...(prev || {
-              id: 'ps_live',
-              device_id: data.deviceId || selectedDevice?.id || '',
-              mode: data.pumpMode || 'AUTOMATIC',
-              runtime_seconds: 0,
-              changed_at: new Date().toISOString(),
-              changed_by: 'HARDWARE_TELEMETRY'
-            }),
-            pump_state: isRunning ? 'ON' : (data.pumpState === 'FAULT' ? 'FAULT' : 'OFF'),
-            mode: (data.pumpMode || prev?.mode || 'AUTOMATIC') as any,
-            current_draw_amps: Number(data.currentAmps ?? (isRunning ? 4.8 : 0.0)),
-            runtime_seconds: Number(data.runtimeSeconds ?? prev?.runtime_seconds ?? 0)
-          }));
+          setPumpStatus(prev => {
+            if (prev?.pump_state === 'STARTING' && !isRunning) {
+              return prev; // Await hardware verification
+            }
+            return {
+              ...(prev || {
+                id: 'ps_live',
+                device_id: data.deviceId || selectedDevice?.id || '',
+                mode: data.pumpMode || 'AUTOMATIC',
+                runtime_seconds: 0,
+                changed_at: new Date().toISOString(),
+                changed_by: 'HARDWARE_TELEMETRY'
+              }),
+              pump_state: isRunning ? 'ON' : (data.pumpState === 'FAULT' ? 'FAULT' : 'OFF'),
+              mode: (data.pumpMode || prev?.mode || 'AUTOMATIC') as any,
+              current_draw_amps: Number(data.currentAmps ?? (isRunning ? 4.8 : 0.0)),
+              runtime_seconds: Number(data.runtimeSeconds ?? prev?.runtime_seconds ?? 0)
+            };
+          });
+
+          if (isRunning) {
+            setCommandPending(false);
+          }
         }
       }
     } else if (event === 'PUMP_STATE_CHANGED') {
@@ -480,6 +481,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ...(prev || {}),
           ...data
         }));
+        if (data.pump_state === 'ON' || data.pump_state === 'OFF') {
+          setCommandPending(false);
+        }
       }
     } else if (event === 'NEW_ALERT') {
       setAlerts(prev => [data, ...prev]);
@@ -492,35 +496,30 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const cmdId = `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const cmdPayload = JSON.stringify({
       cmd_id: cmdId,
-      command_id: cmdId,
       command: actionStr,
       command_type: cmdType,
-      action: actionStr,
-      mode: payload.mode,
       auth_token: 'WPC_AUTH_SECURE_KEY_2026',
-      token: 'WPC_AUTH_SECURE_KEY_2026',
       payload,
-      source: 'WEB_DASHBOARD',
       timestamp: Math.floor(Date.now() / 1000)
     });
 
     if (mqttClientRef.current && mqttClientRef.current.connected) {
       mqttClientRef.current.publish(`devices/${devUid}/commands`, cmdPayload, { qos: 0 });
       mqttClientRef.current.publish(`aquacontrol/${devUid}/commands`, cmdPayload, { qos: 0 });
-      mqttClientRef.current.publish(`aquacontrol/v1/devices/${devUid}/commands`, cmdPayload, { qos: 0 });
       mqttClientRef.current.publish('aquacontrol/commands', cmdPayload, { qos: 0 });
       console.log(`[MQTT Direct] Published command to 'aquacontrol/${devUid}/commands':`, cmdPayload);
     }
   };
 
-  // Instant Real-Time Pump Command Actions (0ms Lag)
+  // Hardware-Verified Pump Command Actions
   const startPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
     lastActionTimeRef.current = Date.now();
-    setCommandStatusText('Energizing Relay Contactor (0ms Fast-Path)...');
+    setCommandPending(true);
+    setCommandStatusText('Trying to Turn ON Pump... Verifying Hardware Contactor');
 
-    // 1. Instant 0ms Optimistic UI Update
+    // 1. Transition state (STARTING - Not yet ON until hardware confirms!)
     setPumpStatus(prev => ({
       ...(prev || {
         id: 'ps_opt',
@@ -530,34 +529,42 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         changed_at: new Date().toISOString(),
         changed_by: 'WEB_OPERATOR'
       }),
-      pump_state: 'ON',
+      pump_state: 'STARTING',
       mode: 'MANUAL',
-      current_draw_amps: 4.8
+      current_draw_amps: 0.0
     }));
 
-    // 2. Direct Instant MQTT Command dispatch to hardware
+    // 2. Direct MQTT Command dispatch to hardware
     publishDirectMqttCommand('START_PUMP', 'START');
 
-    // 3. Parallel non-blocking REST API notification
+    // 3. Parallel REST API notification
     ApiService.startPump(dev.id, user?.email || 'web_operator')
-      .then(() => {
-        setCommandStatusText('Command Dispatched to Controller ✓');
-        setTimeout(() => setCommandStatusText(''), 1200);
-      })
       .catch((err: any) => {
         console.warn('[DeviceContext] Backend start notification note:', err.message);
-        setCommandStatusText('Dispatched via Cloud MQTT ✓');
-        setTimeout(() => setCommandStatusText(''), 1200);
       });
+
+    // 4. Hardware Verification Timeout (6 seconds)
+    setTimeout(() => {
+      setPumpStatus(curr => {
+        if (curr?.pump_state === 'STARTING') {
+          setCommandPending(false);
+          setCommandStatusText('Pump did NOT turn on. Hardware verification failed ✗');
+          setTimeout(() => setCommandStatusText(''), 4000);
+          return { ...curr, pump_state: 'OFF', current_draw_amps: 0.0 };
+        }
+        return curr;
+      });
+    }, 6000);
   };
 
   const stopPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
     lastActionTimeRef.current = Date.now();
-    setCommandStatusText('De-energizing Contactor (0ms Fast-Path)...');
+    setCommandPending(true);
+    setCommandStatusText('Trying to Turn OFF Pump... Verifying Hardware Contactor');
 
-    // 1. Instant 0ms Optimistic UI Update
+    // 1. Transition state (STOPPING - Not yet OFF until hardware confirms!)
     setPumpStatus(prev => ({
       ...(prev || {
         id: 'ps_opt',
@@ -567,24 +574,31 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         changed_at: new Date().toISOString(),
         changed_by: 'WEB_OPERATOR'
       }),
-      pump_state: 'OFF',
+      pump_state: 'STOPPING',
       current_draw_amps: 0.0
     }));
 
-    // 2. Direct Instant MQTT Command dispatch to hardware
+    // 2. Direct MQTT Command dispatch to hardware
     publishDirectMqttCommand('STOP_PUMP', 'STOP');
 
-    // 3. Parallel non-blocking REST API notification
+    // 3. Parallel REST API notification
     ApiService.stopPump(dev.id, user?.email || 'web_operator')
-      .then(() => {
-        setCommandStatusText('Pump Stopped Successfully ✓');
-        setTimeout(() => setCommandStatusText(''), 1200);
-      })
       .catch((err: any) => {
         console.warn('[DeviceContext] Backend stop notification note:', err.message);
-        setCommandStatusText('Dispatched via Cloud MQTT ✓');
-        setTimeout(() => setCommandStatusText(''), 1200);
       });
+
+    // 4. Hardware Verification Timeout (6 seconds)
+    setTimeout(() => {
+      setPumpStatus(curr => {
+        if (curr?.pump_state === 'STOPPING') {
+          setCommandPending(false);
+          setCommandStatusText('Pump stop verification timed out');
+          setTimeout(() => setCommandStatusText(''), 3000);
+          return { ...curr, pump_state: 'OFF', current_draw_amps: 0.0 };
+        }
+        return curr;
+      });
+    }, 6000);
   };
 
   const setMode = async (mode: string) => {
@@ -665,7 +679,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         commandStatusText,
         refreshDevices,
         refreshRules,
-        reconnectWs,
+        reconnectWs: async () => { connectWs(); },
         startPump,
         stopPump,
         setMode,
