@@ -155,8 +155,11 @@ export const ProvisioningWizard: React.FC = () => {
     setProvisioning(true);
     setErrorMsg('');
     setStatusMessage('1/3 Encoding Wi-Fi, MQTT & Account Auth Barrier...');
-    const userAuthId = user?.id || 'usr_karthik_admin_001';
-    const effectiveAuthCode = userAuthCode || (user ? `WPC-AUTH-${(user.id || user.email || 'USER').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16)}` : 'WPC-AUTH-DEFAULT');
+    const activeUser = user || (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('pump_user') || localStorage.getItem('user') || 'null') : null);
+    const userAuthId = activeUser?.id || 'usr_karthik_admin_001';
+    const effectiveAuthCode = (userAuthCode && userAuthCode !== 'WPC-AUTH-DEFAULT')
+      ? userAuthCode
+      : (activeUser ? `WPC-AUTH-${(activeUser.id || activeUser.email || 'USER').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16)}` : 'WPC-AUTH-DEFAULT');
     const mqttBrokerHost = 'broker.emqx.io';
     const apiUrl = `http://${serverHost}:${serverPort}/api/v1`;
     addLog(`Preparing Wi-Fi & Unique Account Auth payload (Auth Code: ${effectiveAuthCode})...`);
@@ -171,7 +174,7 @@ export const ProvisioningWizard: React.FC = () => {
       auth_code: effectiveAuthCode,
       uid: userAuthId,
       owner_id: userAuthId,
-      user_email: user?.email
+      user_email: activeUser?.email
     });
 
     let blePushed = false;
@@ -630,6 +633,17 @@ export const ProvisioningWizard: React.FC = () => {
                   {selectedDevice?.name} (<span className="text-cyan-400">{selectedDevice?.deviceUid}</span>)
                 </p>
               </div>
+            </div>
+
+            {/* Account Auth Code Lock Banner */}
+            <div className="p-3.5 neu-inset rounded-xl flex items-center justify-between border border-cyan-500/30 bg-slate-950/70 font-mono text-xs">
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase block font-bold">TARGET ACCOUNT AUTH CODE (AUTO-BUNDLED)</span>
+                <span className="text-cyan-400 font-extrabold tracking-wider">{userAuthCode || (user ? `WPC-AUTH-${(user.id || user.email || 'USER').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16)}` : 'WPC-AUTH-DEFAULT')}</span>
+              </div>
+              <span className="text-[10px] text-emerald-400 font-bold px-2 py-1 rounded bg-emerald-950 border border-emerald-500/40">
+                LOCKED TO THIS ACCOUNT
+              </span>
             </div>
 
             {/* Wi-Fi 2.4GHz Important Note */}

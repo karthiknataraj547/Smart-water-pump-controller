@@ -532,6 +532,9 @@ input:focus,select:focus{border-color:#38bdf8}
     <label>Wi-Fi Password</label>
     <input type="password" id="passInput" placeholder="Enter Wi-Fi Password">
 
+    <label>Account Auth Code (From App Dashboard)</label>
+    <input type="text" id="authInput" placeholder="e.g. WPC-AUTH-USRKARTHIKADMIN0">
+
     <label>MQTT Cloud Broker</label>
     <input type="text" id="brokerInput" value="broker.emqx.io" required placeholder="e.g. broker.emqx.io">
 
@@ -577,11 +580,12 @@ function onSelectSsid() {
 function submitConfig() {
   var s = document.getElementById('ssidInput').value.trim();
   var p = document.getElementById('passInput').value;
+  var a = document.getElementById('authInput').value.trim();
   var b = document.getElementById('brokerInput').value.trim() || 'broker.emqx.io';
   
   if (!s) { alert('Please enter Wi-Fi SSID'); return false; }
   
-  var payload = { ssid: s, password: p, mqtt_broker: b, mqtt_port: 1883 };
+  var payload = { ssid: s, password: p, mqtt_broker: b, mqtt_port: 1883, auth_code: a, auth: a };
   document.getElementById('saveBtn').textContent = 'CONNECTING...';
   document.getElementById('saveBtn').disabled = true;
 
