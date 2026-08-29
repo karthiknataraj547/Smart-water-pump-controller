@@ -268,19 +268,15 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         mqttClientRef.current = client;
 
         client.on('connect', () => {
-          console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker! Subscribing to account telemetry and global discovery...');
+          console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker! Subscribing to telemetry and commands...');
           setMqttConnected(true);
           
-          // 1. Subscribe ONLY to this account's registered devices (Strict Account Isolation)
-          if (devicesRef.current.length > 0) {
-            devicesRef.current.forEach(d => {
-              client.subscribe(`devices/${d.device_uid}/telemetry`);
-              client.subscribe(`devices/${d.device_uid}/ack`);
-              client.subscribe(`devices/${d.device_uid}/status`);
-              client.subscribe(`aquacontrol/${d.device_uid}/#`);
-            });
-          }
-
+          // Subscribe to hardware device telemetry, ACK, and status streams
+          client.subscribe('devices/+/telemetry');
+          client.subscribe('devices/+/ack');
+          client.subscribe('devices/+/status');
+          client.subscribe('devices/+/commands');
+          client.subscribe('aquacontrol/#');
           client.subscribe('aquacontrol/ownership/#');
         });
 
@@ -322,54 +318,37 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               }
             }
 
-            // =========================================================================
-            // STRICT PER-ACCOUNT HARDWARE BARRIER & AUTH CODE ISOLATION
-            // =========================================================================
-            // If device was explicitly deleted/unlinked by this account, strictly ignore its telemetry
-            if (unlinkedDevicesRef.current.has(deviceUid)) {
+            // If device was explicitly deleted/unlinked by this account, ignore its telemetry
+            if (deviceUid && unlinkedDevicesRef.current.has(deviceUid.toUpperCase())) {
               return;
             }
 
-            const activeUser = userRef.current;
-            const activeAuthCode = userAuthCodeRef.current || (activeUser ? computeUserAuthCode(activeUser) : 'WPC-AUTH-DEFAULT');
+            // Check if this device is registered in this account's devices list or is currently selected
+            let targetDev = devicesRef.current.find(d => d.device_uid === deviceUid || d.id === deviceUid) 
+              || (selectedDeviceRef.current?.device_uid === deviceUid ? selectedDeviceRef.current : null);
 
-            // While user profile is loading, do not eject devices
-            if (!activeUser && activeAuthCode === 'WPC-AUTH-DEFAULT') {
-              return;
+            // If account has no devices yet, create a default device entry for the active hardware
+            if (!targetDev && devicesRef.current.length === 0 && deviceUid) {
+              const activeUser = userRef.current;
+              const autoDev: Device = {
+                id: `dev_${deviceUid.toLowerCase()}`,
+                device_uid: deviceUid,
+                serial_number: `SN-2026-ESP32-${deviceUid.slice(-4)}`,
+                device_type: 'ESP32_MAIN_CONTROLLER',
+                owner_id: activeUser?.id || 'usr_owner',
+                status: 'online',
+                firmware_version: 'v2.2.0',
+                tank_capacity_liters: 2000,
+                tank_height_cm: 180,
+                last_seen: new Date().toISOString()
+              };
+              targetDev = autoDev;
+              setDevices([autoDev]);
+              setSelectedDevice(autoDev);
+              devicesRef.current = [autoDev];
             }
-
-            const incomingAuth = (data.auth_code || data.owner_id || data.user_auth_id || '').toString().trim();
-            const isAuthMatch = Boolean(
-              incomingAuth && activeAuthCode !== 'WPC-AUTH-DEFAULT' && (
-                incomingAuth === activeAuthCode ||
-                (activeUser && incomingAuth === activeUser.id) ||
-                (activeUser && activeUser.email && incomingAuth.toLowerCase() === activeUser.email.toLowerCase()) ||
-                (activeUser && incomingAuth === `WPC_AUTH_${activeUser.id}`) ||
-                (activeUser && incomingAuth === `WPC-AUTH-${(activeUser.id || activeUser.email || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16)}`)
-              )
-            );
-
-            // If hardware broadcasts an auth_code that belongs to ANOTHER account (and definitely not this account):
-            if (incomingAuth && incomingAuth !== 'UNPROVISIONED' && !isAuthMatch && activeAuthCode !== 'WPC-AUTH-DEFAULT') {
-              // Eject from active account if it was previously cached or in devicesRef
-              if (devicesRef.current.some(d => d.device_uid === deviceUid)) {
-                console.warn(`[Security Barrier] Hardware ${deviceUid} has Auth Code '${incomingAuth}' which does NOT match active Account Auth Code '${activeAuthCode}'. Ejecting device from this account.`);
-                setDevices(prev => prev.filter(d => d.device_uid !== deviceUid));
-                devicesRef.current = devicesRef.current.filter(d => d.device_uid !== deviceUid);
-                if (selectedDeviceRef.current?.device_uid === deviceUid) {
-                  setSelectedDevice(null);
-                  setIsDeviceOnline(false);
-                }
-              }
-              // STRICTLY DROP THIS PACKET - Do not let unauthorized account process or show online
-              return;
-            }
-
-            // Check if this device is registered in this account's devicesRef
-            let targetDev = devicesRef.current.find(d => d.device_uid === deviceUid || d.id === deviceUid);
 
             if (!targetDev) {
-              // Hardware is not registered in this account. Strictly ignore and drop packet.
               return;
             }
 
