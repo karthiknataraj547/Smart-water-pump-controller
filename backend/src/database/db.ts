@@ -151,6 +151,18 @@ export class DBManager {
       );
     }
 
+    // 4. Seed Karthik Wzatco Account if not present
+    const existingWzatco = await this.queryOne<any>('SELECT * FROM users WHERE LOWER(email) = ?', ['karthik@wzatco.com']);
+    if (!existingWzatco) {
+      console.log('[DB] Seeding Karthik Wzatco user (karthik@wzatco.com)...');
+      const wzatcoId = 'usr_wzatco_karthik_001';
+      const wzatcoPassHash = bcrypt.hashSync('wzatco@123', 10);
+      await this.execute(
+        'INSERT INTO users (id, name, email, phone, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime("now"))',
+        [wzatcoId, 'Karthik Wzatco', 'karthik@wzatco.com', '+91-9876543210', wzatcoPassHash, 'admin', 'active']
+      );
+    }
+
     // 3. Seed Default Device & Nodes if not present
     const existingDevice = await this.queryOne<any>('SELECT * FROM devices WHERE device_uid = ?', ['WPC-A81F29']);
     if (!existingDevice) {

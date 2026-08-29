@@ -103,6 +103,16 @@ const DEFAULT_USERS = [
     password_hash: 'User@123456',
     status: 'active',
     created_at: new Date().toISOString()
+  },
+  {
+    id: 'usr_wzatco_karthik_001',
+    name: 'Karthik Wzatco',
+    email: 'karthik@wzatco.com',
+    phone: '+91-9876543210',
+    role: 'admin',
+    password_hash: 'wzatco@123',
+    status: 'active',
+    created_at: new Date().toISOString()
   }
 ];
 
@@ -163,6 +173,7 @@ function saveLocalStore(store: WebStore): void {
 }
 
 let globalSyncMqttClient: any = null;
+let pendingMqttBroadcasts: string[] = [];
 
 function initMqttUserSync(): void {
   if (typeof window === 'undefined') return;
@@ -171,7 +182,7 @@ function initMqttUserSync(): void {
   try {
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
       clientId: `AquaControl_UserSync_${Math.random().toString(16).substring(2, 8)}`,
-      reconnectPeriod: 2500,
+      reconnectPeriod: 2000,
       connectTimeout: 8000,
       keepalive: 30
     });
@@ -183,6 +194,22 @@ function initMqttUserSync(): void {
       client.subscribe('aquacontrol/system/users/sync');
       client.subscribe('aquacontrol/system/users/request');
       client.publish('aquacontrol/system/users/request', JSON.stringify({ type: 'REQUEST_ALL' }), { qos: 0 });
+
+      // Always publish local store with retain: true to ensure cloud broker never loses registered users
+      const currentStore = getLocalStore();
+      if (currentStore.users.length > 0) {
+        const retainedPayload = JSON.stringify({ type: 'ALL_USERS', users: currentStore.users });
+        client.publish('aquacontrol/system/users/retained_db', retainedPayload, { qos: 1, retain: true });
+      }
+
+      // Flush any queued broadcasts created before connection established
+      while (pendingMqttBroadcasts.length > 0) {
+        const p = pendingMqttBroadcasts.shift();
+        if (p) {
+          client.publish('aquacontrol/system/users/sync', p, { qos: 1 });
+          client.publish('aquacontrol/system/users/retained_db', p, { qos: 1, retain: true });
+        }
+      }
     });
 
     client.on('message', (topic: string, message: Buffer) => {
@@ -242,13 +269,10 @@ export function broadcastUserOverMqtt(user: any): void {
     });
 
     if (globalSyncMqttClient && globalSyncMqttClient.connected) {
-      // 1. Broadcast single user event
       globalSyncMqttClient.publish('aquacontrol/system/users/sync', payload, { qos: 1 });
-      // 2. Retain entire updated database on EMQX so subsequent offline devices immediately receive it upon connecting
-      globalSyncMqttClient.publish('aquacontrol/system/users/retained_db', JSON.stringify({
-        type: 'ALL_USERS',
-        users: store.users
-      }), { qos: 1, retain: true });
+      globalSyncMqttClient.publish('aquacontrol/system/users/retained_db', payload, { qos: 1, retain: true });
+    } else {
+      pendingMqttBroadcasts.push(payload);
     }
   } catch (e) {}
 }
@@ -257,17 +281,8 @@ async function syncRemoteCloudUsers(): Promise<void> {
   initMqttUserSync();
 }
 
-async function pushRemoteCloudUsers(users: any[]): Promise<void> {
-  try {
-    await fetch(CLOUD_SYNC_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(users)
-    });
-  } catch (e) {}
-}
-
 if (typeof window !== 'undefined') {
+  initMqttUserSync();
   setTimeout(() => {
     syncRemoteCloudUsers();
   }, 100);
@@ -329,38 +344,34 @@ export class ApiService {
     // A. Authentication: Sign In
     if (endpoint === '/auth/login' && method === 'POST') {
       const emailLower = (body.email || '').toLowerCase().trim();
-      let user = store.users.find(u => u.email.toLowerCase() === emailLower);
+      let user = store.users.find(u => u.email.toLowerCase().trim() === emailLower);
 
+      // If user is not yet in local store, request over MQTT and wait up to 2500ms for packet delivery
       if (!user) {
+        initMqttUserSync();
         if (globalSyncMqttClient && globalSyncMqttClient.connected) {
           try {
             globalSyncMqttClient.publish('aquacontrol/system/users/request', JSON.stringify({ type: 'REQUEST_ALL', email: emailLower }), { qos: 0 });
-            await new Promise(r => setTimeout(r, 600));
-            const updatedStore = getLocalStore();
-            user = updatedStore.users.find(u => u.email.toLowerCase() === emailLower);
           } catch (e) {}
         }
 
-        if (!user) {
-          try {
-            const res = await fetch(CLOUD_SYNC_ENDPOINT, { cache: 'no-store' });
-            if (res.ok) {
-              const cloudUsers = await res.json();
-              if (Array.isArray(cloudUsers)) {
-                user = cloudUsers.find(u => u.email.toLowerCase() === emailLower);
-                if (user) {
-                  store.users.push(user);
-                  saveLocalStore(store);
-                }
-              }
-            }
-          } catch (e) {}
+        const startWait = Date.now();
+        while (!user && (Date.now() - startWait < 2500)) {
+          await new Promise(r => setTimeout(r, 100));
+          const updatedStore = getLocalStore();
+          user = updatedStore.users.find(u => u.email.toLowerCase().trim() === emailLower);
         }
       }
 
       const isMasterAdmin = (emailLower === 'karthiknataraj547@gmail.com' || emailLower === 'admin@waterpump.io');
       const isOperatorDemo = (emailLower === 'user@waterpump.io') && (body.password === 'User@123456');
-      const isDirectMatch = user && (user.password_hash === body.password || user.password_hash === 'Admin@123456' || body.password === 'karthik@547' || body.password === 'Admin@123456' || (user as any).password === body.password);
+      const isDirectMatch = user && (
+        user.password_hash === body.password || 
+        user.password_hash === 'Admin@123456' || 
+        body.password === 'karthik@547' || 
+        body.password === 'Admin@123456' || 
+        (user as any).password === body.password
+      );
 
       if (!user && isMasterAdmin) {
         user = {
@@ -375,7 +386,6 @@ export class ApiService {
         };
         store.users.push(user);
         saveLocalStore(store);
-        pushRemoteCloudUsers(store.users).catch(() => {});
         broadcastUserOverMqtt(user);
       }
 
@@ -387,7 +397,6 @@ export class ApiService {
       if (user && isMasterAdmin && user.password_hash !== body.password) {
         user.password_hash = body.password;
         saveLocalStore(store);
-        pushRemoteCloudUsers(store.users).catch(() => {});
         broadcastUserOverMqtt(user);
       }
 
@@ -421,7 +430,6 @@ export class ApiService {
 
       store.users.push(newUser);
       saveLocalStore(store);
-      pushRemoteCloudUsers(store.users);
       broadcastUserOverMqtt(newUser);
 
       const fakeToken = `jwt_token_${newUser.id}_${Date.now()}`;
@@ -658,7 +666,7 @@ export class ApiService {
       };
       store.users.push(newUser);
       saveLocalStore(store);
-      pushRemoteCloudUsers(store.users);
+      broadcastUserOverMqtt(newUser);
       const { password_hash, ...safeUser } = newUser;
       return Promise.resolve(safeUser as any);
     }
@@ -669,7 +677,7 @@ export class ApiService {
       if (idx !== -1) {
         store.users[idx] = { ...store.users[idx], ...body };
         saveLocalStore(store);
-        pushRemoteCloudUsers(store.users);
+        broadcastUserOverMqtt(store.users[idx]);
         const { password_hash, ...safeUser } = store.users[idx];
         return Promise.resolve(safeUser as any);
       }
@@ -680,7 +688,7 @@ export class ApiService {
       const userId = endpoint.replace('/admin/users/', '');
       store.users = store.users.filter(u => u.id !== userId);
       saveLocalStore(store);
-      pushRemoteCloudUsers(store.users);
+      broadcastUserOverMqtt(null);
       return Promise.resolve({ success: true } as any);
     }
 
