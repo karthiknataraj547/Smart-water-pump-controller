@@ -135,39 +135,30 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   })()));
 
-  // 1-second interval heartbeat check (no UI freezing, stable online detection)
+  // 1-second interval heartbeat check with 15s grace window (Smooth, rock-solid online state)
   useEffect(() => {
     const timer = setInterval(() => {
-      const isOnline = Date.now() - lastTelemetryTimestampRef.current < 10000;
+      const now = Date.now();
+      const isOnline = (now - lastTelemetryTimestampRef.current < 15000);
       setIsDeviceOnline(prev => (prev !== isOnline ? isOnline : prev));
     }, 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Load devices on auth change (Strict Per-User Device Isolation)
+  // Load devices on auth change (Preserves active live hardware session)
   const refreshDevices = useCallback(async () => {
     try {
       const list = await ApiService.getDevices();
-      setDevices(list);
-      if (list.length > 0) {
+      if (list && list.length > 0) {
+        setDevices(list);
         setSelectedDevice(prev => {
-          if (!prev) {
-            return list[0];
-          }
-          const found = list.find((d: Device) => d.id === prev.id);
+          if (!prev) return list[0];
+          const found = list.find((d: Device) => d.id === prev.id || d.device_uid === prev.device_uid);
           return found || list[0];
         });
-      } else {
-        setSelectedDevice(null);
-        setPumpStatus(null);
-        setTelemetry(null);
-        setRules([]);
-        setAlerts([]);
       }
     } catch (err) {
       console.warn('[DeviceContext] Error fetching devices:', err);
-      setDevices([]);
-      setSelectedDevice(null);
     }
   }, []);
 
@@ -496,8 +487,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   setCommandPending(false);
                 }
               } else {
-                setSelectedDevice(prev => prev ? { ...prev, status: 'offline' } : prev);
-                setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'offline' } : d));
+                // Grace window: only mark offline if no live telemetry received in 15 seconds
+                if (Date.now() - lastTelemetryTimestampRef.current > 15000) {
+                  setIsDeviceOnline(false);
+                  setSelectedDevice(prev => prev ? { ...prev, status: 'offline' } : prev);
+                  setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'offline' } : d));
+                }
               }
             }
           } catch (err) {

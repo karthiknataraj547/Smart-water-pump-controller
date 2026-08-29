@@ -1341,21 +1341,21 @@ void TaskNetworkLoop(void *parameter) {
                     mqttClient.setServer(mqttBroker.c_str(), mqttPort);
                     mqttClient.setCallback(onMqttMessage);
                     mqttClient.setBufferSize(1024);
-                    mqttClient.setKeepAlive(30);
+                    mqttClient.setKeepAlive(15);
 
-                    String clientId = String("ESP32_") + DEVICE_UID + "_" + String(random(1000, 9999));
-                    String lwtTopic1 = String("devices/") + DEVICE_UID + "/status";
-                    String lwtTopic2 = String("aquacontrol/") + DEVICE_UID + "/status";
-                    String lwtTopic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/status";
-                    String lwtPayload = "{\"status\":\"offline\",\"device_uid\":\"" + String(DEVICE_UID) + "\"}";
+                    String clientId = String("ESP32_HW_") + dynamicDeviceUid;
+                    String lwtTopic1 = String("devices/") + dynamicDeviceUid + "/status";
+                    String lwtTopic2 = String("aquacontrol/") + dynamicDeviceUid + "/status";
+                    String lwtTopic3 = String("aquacontrol/v1/devices/") + dynamicDeviceUid + "/status";
+                    String lwtPayload = "{\"status\":\"offline\",\"device_uid\":\"" + dynamicDeviceUid + "\"}";
 
                     Serial.printf("[MQTT] Connecting to '%s:%d' (Client: %s)...\n",
                         mqttBroker.c_str(), mqttPort, clientId.c_str());
 
-                    // Try standard open connection first (ideal for broker.emqx.io)
-                    bool conn = mqttClient.connect(clientId.c_str(), lwtTopic1.c_str(), 0, true, lwtPayload.c_str());
+                    // Connect with clean session and LWT
+                    bool conn = mqttClient.connect(clientId.c_str(), lwtTopic1.c_str(), 0, false, lwtPayload.c_str());
                     if (!conn && authCode.length() > 0) {
-                        conn = mqttClient.connect(clientId.c_str(), DEVICE_UID, authCode.c_str(), lwtTopic1.c_str(), 0, true, lwtPayload.c_str());
+                        conn = mqttClient.connect(clientId.c_str(), dynamicDeviceUid.c_str(), authCode.c_str(), lwtTopic1.c_str(), 0, false, lwtPayload.c_str());
                     }
 
                     if (conn) {
