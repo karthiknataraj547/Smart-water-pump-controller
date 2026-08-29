@@ -1,4 +1,5 @@
 import { Device, PumpStatus, AutomationRule, Alert, SafetyPolicy, User, AuditLogEntry, AdminStats, DeviceNode } from '../types';
+import mqtt from 'mqtt';
 
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
@@ -79,7 +80,7 @@ const DEFAULT_USERS = [
     email: 'karthiknataraj547@gmail.com',
     phone: '+91-9876543210',
     role: 'admin',
-    password_hash: 'Admin@123456',
+    password_hash: 'karthik@547',
     status: 'active',
     created_at: new Date().toISOString()
   },
@@ -114,7 +115,7 @@ function getLocalStore(): WebStore {
         device_uid: 'WPC-A81F29',
         serial_number: 'SN-2026-ESP32-9921',
         device_type: 'ESP32_MAIN_CONTROLLER',
-        owner_id: 'usr_admin_001',
+        owner_id: 'usr_karthik_admin_001',
         status: 'online',
         firmware_version: 'v2.1.0',
         local_ip: '192.168.31.53',
@@ -124,77 +125,14 @@ function getLocalStore(): WebStore {
         last_seen: new Date().toISOString()
       }
     ],
-    pumpStatus: {
-      '97511f3d-e3b7-4b75-876f-b11b259f86d5': {
-        id: 'ps_001',
-        device_id: '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-        pump_state: 'OFF',
-        mode: 'AUTOMATIC',
-        runtime_seconds: 0,
-        current_draw_amps: 0.0,
-        changed_at: new Date().toISOString(),
-        changed_by: 'SYSTEM_INIT'
-      }
-    },
-    telemetry: {
-      '97511f3d-e3b7-4b75-876f-b11b259f86d5': {
-        id: 'tel_001',
-        device_id: '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-        water_level_percentage: 42.5,
-        water_level_liters: 850,
-        inflow_rate_lpm: 0.0,
-        total_inflow_liters: 1420,
-        tds_ppm: 142,
-        temperature_c: 28.5,
-        sensor_status: 'HEALTHY',
-        created_at: new Date().toISOString()
-      }
-    },
-    rules: {
-      '97511f3d-e3b7-4b75-876f-b11b259f86d5': [
-        {
-          id: 'rule_001',
-          device_id: '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-          rule_name: 'Auto-Start on Low Tank (< 30%)',
-          condition_json: { level_lt: 30 },
-          action_json: { pump_action: 'START', generate_alert: true, alert_title: 'Auto-Start: Low Water Threshold Reached' },
-          enabled: true,
-          priority: 1,
-          created_at: new Date().toISOString()
-        },
-        {
-          id: 'rule_002',
-          device_id: '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-          rule_name: 'Auto-Stop on Tank Full (>= 95%)',
-          condition_json: { level_gt: 95 },
-          action_json: { pump_action: 'STOP', generate_alert: true, alert_title: 'Auto-Stop: Tank Capacity Reached (95%)' },
-          enabled: true,
-          priority: 1,
-          created_at: new Date().toISOString()
-        }
-      ]
-    },
-    alerts: [
-      {
-        id: 'alt_001',
-        device_id: '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-        severity: 'info',
-        title: 'System Online & Armed',
-        message: 'Smart Water Pump Controller initialized with local fail-safe automation and ESP-NOW Sub Node link.',
-        acknowledged: false,
-        created_at: new Date().toISOString()
-      }
-    ],
-    auditLogs: [],
-    safetyPolicy: {
-      overcurrentLimitAmps: 15.0,
-      dryRunTimeoutSec: 120,
-      maxContinuousRuntimeSec: 7200,
-      autoStartLevelPct: 30.0,
-      autoStopLevelPct: 95.0,
-      shortCycleDelaySec: 180
-    }
+    pumpStatus: {},
+    telemetry: {},
+    rules: {},
+    alerts: [],
+    auditLogs: []
   };
+
+  if (typeof window === 'undefined') return defaultStore;
 
   try {
     const raw = localStorage.getItem('pump_cloud_store');
@@ -224,7 +162,77 @@ function saveLocalStore(store: WebStore): void {
   } catch (e) {}
 }
 
+let globalSyncMqttClient: any = null;
+
+function initMqttUserSync(): void {
+  if (typeof window === 'undefined') return;
+  if (globalSyncMqttClient) return;
+
+  try {
+    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+      clientId: `AquaControl_UserSync_${Math.random().toString(16).substring(2, 8)}`,
+      reconnectPeriod: 3000,
+      connectTimeout: 8000,
+      keepalive: 30
+    });
+    globalSyncMqttClient = client;
+
+    client.on('connect', () => {
+      client.subscribe('aquacontrol/system/users/sync');
+      client.publish('aquacontrol/system/users/request', JSON.stringify({ type: 'REQUEST_ALL' }), { qos: 0 });
+    });
+
+    client.on('message', (topic: string, message: Buffer) => {
+      try {
+        const payloadStr = message.toString();
+        if (!payloadStr) return;
+        const data = JSON.parse(payloadStr);
+
+        const store = getLocalStore();
+        let changed = false;
+
+        if (data.type === 'USER_REGISTERED' && data.user) {
+          const u = data.user;
+          const idx = store.users.findIndex(x => x.email.toLowerCase() === (u.email || '').toLowerCase());
+          if (idx === -1) {
+            store.users.push(u);
+            changed = true;
+          } else {
+            store.users[idx] = { ...store.users[idx], ...u };
+            changed = true;
+          }
+        } else if (data.type === 'ALL_USERS' && Array.isArray(data.users)) {
+          for (const u of data.users) {
+            const idx = store.users.findIndex(x => x.email.toLowerCase() === (u.email || '').toLowerCase());
+            if (idx === -1) {
+              store.users.push(u);
+              changed = true;
+            } else {
+              store.users[idx] = { ...store.users[idx], ...u };
+              changed = true;
+            }
+          }
+        }
+
+        if (changed) {
+          saveLocalStore(store);
+        }
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+export function broadcastUserOverMqtt(user: any): void {
+  if (globalSyncMqttClient && globalSyncMqttClient.connected) {
+    globalSyncMqttClient.publish('aquacontrol/system/users/sync', JSON.stringify({
+      type: 'USER_REGISTERED',
+      user
+    }), { qos: 1 });
+  }
+}
+
 async function syncRemoteCloudUsers(): Promise<void> {
+  initMqttUserSync();
   try {
     const res = await fetch(CLOUD_SYNC_ENDPOINT, { cache: 'no-store' });
     if (res.ok) {
@@ -325,24 +333,35 @@ export class ApiService {
       let user = store.users.find(u => u.email.toLowerCase() === emailLower);
 
       if (!user) {
-        try {
-          const res = await fetch(CLOUD_SYNC_ENDPOINT, { cache: 'no-store' });
-          if (res.ok) {
-            const cloudUsers = await res.json();
-            if (Array.isArray(cloudUsers)) {
-              user = cloudUsers.find(u => u.email.toLowerCase() === emailLower);
-              if (user) {
-                store.users.push(user);
-                saveLocalStore(store);
+        if (globalSyncMqttClient && globalSyncMqttClient.connected) {
+          try {
+            globalSyncMqttClient.publish('aquacontrol/system/users/request', JSON.stringify({ type: 'REQUEST_ALL', email: emailLower }), { qos: 0 });
+            await new Promise(r => setTimeout(r, 600));
+            const updatedStore = getLocalStore();
+            user = updatedStore.users.find(u => u.email.toLowerCase() === emailLower);
+          } catch (e) {}
+        }
+
+        if (!user) {
+          try {
+            const res = await fetch(CLOUD_SYNC_ENDPOINT, { cache: 'no-store' });
+            if (res.ok) {
+              const cloudUsers = await res.json();
+              if (Array.isArray(cloudUsers)) {
+                user = cloudUsers.find(u => u.email.toLowerCase() === emailLower);
+                if (user) {
+                  store.users.push(user);
+                  saveLocalStore(store);
+                }
               }
             }
-          }
-        } catch (e) {}
+          } catch (e) {}
+        }
       }
 
       const isMasterAdmin = (emailLower === 'karthiknataraj547@gmail.com' || emailLower === 'admin@waterpump.io');
       const isOperatorDemo = (emailLower === 'user@waterpump.io') && (body.password === 'User@123456');
-      const isDirectMatch = user && (user.password_hash === body.password || user.password_hash === 'Admin@123456' || body.password === 'karthik@547' || body.password === 'Admin@123456');
+      const isDirectMatch = user && (user.password_hash === body.password || user.password_hash === 'Admin@123456' || body.password === 'karthik@547' || body.password === 'Admin@123456' || (user as any).password === body.password);
 
       if (!user && isMasterAdmin) {
         user = {
@@ -358,6 +377,7 @@ export class ApiService {
         store.users.push(user);
         saveLocalStore(store);
         pushRemoteCloudUsers(store.users).catch(() => {});
+        broadcastUserOverMqtt(user);
       }
 
       if (!user || (!isDirectMatch && !isMasterAdmin && !isOperatorDemo)) {
@@ -369,6 +389,7 @@ export class ApiService {
         user.password_hash = body.password;
         saveLocalStore(store);
         pushRemoteCloudUsers(store.users).catch(() => {});
+        broadcastUserOverMqtt(user);
       }
 
       const fakeToken = `jwt_token_${user.id}_${Date.now()}`;
@@ -390,8 +411,8 @@ export class ApiService {
       const isPrimaryAdmin = emailLower === 'karthiknataraj547@gmail.com';
       const newUser = {
         id: `usr_${Date.now()}`,
-        name: body.name,
-        email: body.email.trim(),
+        name: body.name.trim(),
+        email: emailLower,
         phone: body.phone || '+91-9876543210',
         role: isPrimaryAdmin ? 'admin' : (body.role || 'operator'),
         password_hash: body.password,
@@ -402,6 +423,7 @@ export class ApiService {
       store.users.push(newUser);
       saveLocalStore(store);
       pushRemoteCloudUsers(store.users);
+      broadcastUserOverMqtt(newUser);
 
       const fakeToken = `jwt_token_${newUser.id}_${Date.now()}`;
       return Promise.resolve({

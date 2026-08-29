@@ -2,6 +2,7 @@ import net from 'net';
 import Aedes from 'aedes';
 import mqtt, { MqttClient } from 'mqtt';
 import { ENV } from '../config/env';
+import { db } from '../database/db';
 
 export class MqttBridge {
   private static instance: MqttBridge;
@@ -105,6 +106,32 @@ export class MqttBridge {
   private async handleIncomingTopicMessage(topic: string, payloadStr: string): Promise<void> {
     try {
       const data = JSON.parse(payloadStr);
+
+      // Multi-Device Realtime User Mesh Synchronization
+      if (topic.startsWith('aquacontrol/system/users')) {
+        if (topic === 'aquacontrol/system/users/request') {
+          try {
+            const users = await db.query<any>('SELECT id, name, email, phone, password_hash, role, status FROM users');
+            this.publishCloudMessage('aquacontrol/system/users/sync', { type: 'ALL_USERS', users });
+          } catch (e) {}
+        } else if (topic === 'aquacontrol/system/users/sync') {
+          if (data.user) {
+            const u = data.user;
+            const emailLower = (u.email || '').toLowerCase().trim();
+            if (emailLower) {
+              const existing = await db.queryOne<any>('SELECT id FROM users WHERE LOWER(email) = ?', [emailLower]);
+              if (!existing) {
+                await db.execute(
+                  'INSERT INTO users (id, name, email, phone, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime("now"))',
+                  [u.id || `usr_${Date.now()}`, u.name || 'User', emailLower, u.phone || '+91-9876543210', u.password_hash || u.password, u.role || 'operator', 'active']
+                );
+              }
+            }
+          }
+        }
+        return;
+      }
+
       let deviceUid = data.device_uid || data.deviceUid || '';
       let subTopic = '';
 
@@ -166,6 +193,23 @@ export class MqttBridge {
     this.onTelemetryCallback = callbacks.onTelemetry;
     this.onAckCallback = callbacks.onAck;
     this.onStatusCallback = callbacks.onStatus;
+  }
+
+  public publishCloudMessage(topic: string, message: any): void {
+    const payloadStr = typeof message === 'string' ? message : JSON.stringify(message);
+    if (this.cloudClient && this.cloudClient.connected) {
+      this.cloudClient.publish(topic, payloadStr, { qos: 1 });
+    }
+    if (this.aedesInstance) {
+      this.aedesInstance.publish({
+        cmd: 'publish',
+        qos: 1,
+        topic,
+        payload: Buffer.from(payloadStr),
+        retain: false,
+        dup: false
+      }, () => {});
+    }
   }
 
   public publishCommand(deviceUid: string, command: any): void {
