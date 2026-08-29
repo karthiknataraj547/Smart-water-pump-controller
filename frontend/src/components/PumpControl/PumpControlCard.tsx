@@ -1,6 +1,6 @@
 import React from 'react';
 import { useDevice } from '../../context/DeviceContext';
-import { Power, ShieldAlert, Zap, Clock, Activity, Lock, AlertCircle } from 'lucide-react';
+import { Power, ShieldAlert, Zap, Clock, Activity, Lock, AlertCircle, RefreshCw } from 'lucide-react';
 
 export const PumpControlCard: React.FC = () => {
   const {
@@ -11,6 +11,7 @@ export const PumpControlCard: React.FC = () => {
     stopPump,
     setMode,
     emergencyStop,
+    resetLockout,
     commandPending,
     commandStatusText,
     selectedDevice,
@@ -30,8 +31,8 @@ export const PumpControlCard: React.FC = () => {
     ? Number((activeStopRule.condition_json as any).level_gt ?? (activeStopRule.condition_json as any).level_gte) 
     : 100.0;
   const isTankFullInAuto = currentMode === 'AUTOMATIC' && currentWaterLevel >= autoCutoffThreshold;
-  const isStartDisabled = !isDeviceOnline || isRunning || isTankFullInAuto;
-  const isStopDisabled = !isDeviceOnline || !isRunning;
+  const isStartDisabled = !isDeviceOnline || isRunning || isTankFullInAuto || isFault;
+  const isStopDisabled = !isDeviceOnline || !isRunning || isFault;
 
   // Format runtime to HH:MM:SS
   const formatRuntime = (totalSec: number) => {
@@ -78,7 +79,7 @@ export const PumpControlCard: React.FC = () => {
                 !isDeviceOnline
                   ? 'text-rose-400 font-black'
                   : isFault
-                  ? 'text-rose-400'
+                  ? 'text-rose-400 font-black'
                   : isRunning
                   ? 'text-emerald-400 font-black'
                   : 'text-slate-400'
@@ -87,7 +88,7 @@ export const PumpControlCard: React.FC = () => {
               {!isDeviceOnline
                 ? 'HARDWARE UNPOWERED / OFFLINE'
                 : isFault
-                ? 'FAULT / LOCKOUT'
+                ? 'EMERGENCY LOCKOUT ACTIVE'
                 : isRunning
                 ? 'RUNNING'
                 : 'STANDBY'}
@@ -157,10 +158,12 @@ export const PumpControlCard: React.FC = () => {
             title={
               isTankFullInAuto
                 ? `Tank is full (${currentWaterLevel.toFixed(1)}% >= ${autoCutoffThreshold}%). START is disabled in AUTOMATIC mode. Switch to MANUAL to override.`
+                : isFault
+                ? 'Pump is in Emergency Lockout. Reset Lockout first.'
                 : 'Start Pump'
             }
             className={`py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 transition-all ${
-              isRunning
+              isRunning || isFault
                 ? 'opacity-40 cursor-not-allowed neu-inset text-slate-500'
                 : isTankFullInAuto
                 ? 'opacity-60 cursor-not-allowed neu-inset text-amber-400 border border-amber-500/30'
@@ -182,7 +185,7 @@ export const PumpControlCard: React.FC = () => {
             disabled={isStopDisabled}
             onClick={stopPump}
             className={`py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 transition-all ${
-              !isRunning
+              !isRunning || isFault
                 ? 'opacity-40 cursor-not-allowed neu-inset text-slate-500'
                 : 'neu-btn neu-btn-danger cursor-pointer'
             }`}
@@ -204,15 +207,35 @@ export const PumpControlCard: React.FC = () => {
           </div>
         )}
 
-        {/* Emergency Stop Cutoff */}
-        <button
-          type="button"
-          onClick={() => emergencyStop('Manual Emergency Trip from Control Room Dashboard')}
-          className="w-full neu-btn neu-btn-danger py-3.5 text-xs font-black uppercase flex items-center justify-center space-x-2 tracking-widest rounded-2xl cursor-pointer"
-        >
-          <ShieldAlert className="w-4 h-4 text-white animate-pulse" />
-          <span>EMERGENCY CUTOFF (HARDWARE LOCKOUT)</span>
-        </button>
+        {/* Emergency Lockout / Re-Arm Section */}
+        {isFault ? (
+          <div className="space-y-2">
+            <div className="p-3.5 neu-inset rounded-2xl border border-rose-500/50 bg-rose-950/30 text-rose-300 text-xs font-mono flex items-center space-x-2.5">
+              <ShieldAlert className="w-5 h-5 shrink-0 text-rose-400 animate-bounce" />
+              <div>
+                <div className="font-extrabold text-rose-200 uppercase tracking-wide">⚠️ EMERGENCY LOCKOUT ACTIVE</div>
+                <div className="text-[11px] text-rose-300/80">Pump is physically tripped. Verify system safety and click below to re-arm.</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={resetLockout}
+              className="w-full neu-btn neu-btn-success py-3.5 text-xs font-black uppercase flex items-center justify-center space-x-2 tracking-widest rounded-2xl cursor-pointer shadow-lg shadow-emerald-950/40"
+            >
+              <RefreshCw className="w-4 h-4 text-emerald-300" />
+              <span>RESET LOCKOUT & RE-ARM PUMP</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => emergencyStop('Manual Emergency Trip from Control Room Dashboard')}
+            className="w-full neu-btn neu-btn-danger py-3.5 text-xs font-black uppercase flex items-center justify-center space-x-2 tracking-widest rounded-2xl cursor-pointer"
+          >
+            <ShieldAlert className="w-4 h-4 text-white" />
+            <span>TRIP EMERGENCY CUTOFF (HARDWARE LOCKOUT)</span>
+          </button>
+        )}
 
         {/* Command Status Annunciator */}
         {commandStatusText && (

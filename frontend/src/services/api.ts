@@ -441,10 +441,20 @@ export class ApiService {
       return Promise.resolve(store.pumpStatus[devId] as any);
     }
 
-    if (endpoint.includes('/pumps/') && endpoint.endsWith('/emergency-stop')) {
+    if (endpoint.includes('/pumps/') && (endpoint.endsWith('/emergency-stop') || endpoint.endsWith('/estop'))) {
       const devId = store.devices[0]?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5';
       if (store.pumpStatus[devId]) {
         store.pumpStatus[devId].pump_state = 'FAULT';
+        store.pumpStatus[devId].current_draw_amps = 0.0;
+      }
+      saveLocalStore(store);
+      return Promise.resolve(store.pumpStatus[devId] as any);
+    }
+
+    if (endpoint.includes('/pumps/') && (endpoint.endsWith('/reset') || endpoint.endsWith('/clear-fault'))) {
+      const devId = store.devices[0]?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5';
+      if (store.pumpStatus[devId]) {
+        store.pumpStatus[devId].pump_state = 'OFF';
         store.pumpStatus[devId].current_draw_amps = 0.0;
       }
       saveLocalStore(store);
@@ -693,6 +703,13 @@ export class ApiService {
     return this.request(`/pumps/${deviceId}/emergency-stop`, {
       method: 'POST',
       body: JSON.stringify({ reason: reason || 'Manual Emergency Stop Button Triggered' })
+    });
+  }
+
+  static async resetLockout(deviceId: string, source: string = 'web') {
+    return this.request(`/pumps/${deviceId}/reset`, {
+      method: 'POST',
+      body: JSON.stringify({ source })
     });
   }
 

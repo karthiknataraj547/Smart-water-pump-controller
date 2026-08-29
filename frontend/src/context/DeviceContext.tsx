@@ -29,6 +29,7 @@ interface DeviceContextType {
   stopPump: () => Promise<void>;
   setMode: (mode: string) => Promise<void>;
   emergencyStop: (reason?: string) => Promise<void>;
+  resetLockout: () => Promise<void>;
   acknowledgeAlert: (alertId: string) => Promise<void>;
 }
 
@@ -79,6 +80,10 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [waterLevelSensorError, setWaterLevelSensorError] = useState<string | null>(null);
   const lastTelemetryTimestampRef = useRef<number>(0);
   const lastSubnodeTimestampRef = useRef<number>(Date.now());
+
+  // Command State Locks to Prevent Rapid Flickering / Mode Ping-Ponging
+  const desiredPumpStateRef = useRef<{ state: PumpState; timestamp: number } | null>(null);
+  const desiredModeRef = useRef<{ mode: string; timestamp: number } | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mqttClientRef = useRef<MqttClient | null>(null);
@@ -349,18 +354,40 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 const hwMode = (data.pump_mode || 'AUTOMATIC') as any;
                 const hwState: PumpState = isRunning ? 'ON' : (data.pump_state === 'FAULT' ? 'FAULT' : 'OFF');
 
+                const nowMs = Date.now();
+                let effectiveState: PumpState = hwState;
+                let effectiveMode: any = hwMode;
+
+                // Reconcile user-initiated state lock (avoids in-flight telemetry jitter)
+                if (desiredPumpStateRef.current && (nowMs - desiredPumpStateRef.current.timestamp < 3000)) {
+                  if (hwState === desiredPumpStateRef.current.state) {
+                    desiredPumpStateRef.current = null;
+                  } else {
+                    effectiveState = desiredPumpStateRef.current.state;
+                  }
+                }
+
+                // Reconcile user-initiated mode lock (avoids mode bouncing)
+                if (desiredModeRef.current && (nowMs - desiredModeRef.current.timestamp < 3000)) {
+                  if (hwMode === desiredModeRef.current.mode) {
+                    desiredModeRef.current = null;
+                  } else {
+                    effectiveMode = desiredModeRef.current.mode;
+                  }
+                }
+
                 setPumpStatus(prev => ({
                   ...(prev || {
                     id: 'ps_live',
                     device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                    mode: hwMode,
+                    mode: effectiveMode,
                     runtime_seconds: 0,
                     changed_at: new Date().toISOString(),
                     changed_by: 'HARDWARE_TELEMETRY'
                   }),
-                  pump_state: hwState,
-                  mode: hwMode,
-                  current_draw_amps: hwAmps,
+                  pump_state: effectiveState,
+                  mode: effectiveMode,
+                  current_draw_amps: effectiveState === 'ON' ? hwAmps : 0.0,
                   runtime_seconds: hwRuntime > 0 ? hwRuntime : (prev?.runtime_seconds || 0)
                 }));
 
@@ -372,6 +399,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const confirmedState: PumpState = isHwOn ? 'ON' : (isHwFault ? 'FAULT' : 'OFF');
               const hwAmps = Number(data.current_amps ?? (confirmedState === 'ON' ? 4.8 : 0.0));
               const hwRuntime = Number(data.runtime_seconds ?? 0);
+
+              desiredPumpStateRef.current = null;
+              if (data.pump_mode) desiredModeRef.current = null;
 
               setPumpStatus(prev => ({
                 ...(prev || {
@@ -533,31 +563,49 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           temperature_c: Number(data.temperatureC ?? 25),
           sensor_status: data.sensorStatus || 'HEALTHY',
           created_at: data.timestamp || new Date().toISOString()
-        });
-
-        if (data.pumpState !== undefined || typeof data.pumpRunning === 'boolean') {
+        });        if (data.pumpState !== undefined || typeof data.pumpRunning === 'boolean') {
           const isRunning = data.pumpRunning === true || data.pumpState === 'ON';
-          setPumpStatus(prev => {
-            if (prev?.pump_state === 'STARTING' && !isRunning) {
-              return prev; // Await hardware verification
-            }
-            return {
-              ...(prev || {
-                id: 'ps_live',
-                device_id: data.deviceId || selectedDevice?.id || '',
-                mode: data.pumpMode || 'AUTOMATIC',
-                runtime_seconds: 0,
-                changed_at: new Date().toISOString(),
-                changed_by: 'HARDWARE_TELEMETRY'
-              }),
-              pump_state: isRunning ? 'ON' : (data.pumpState === 'FAULT' ? 'FAULT' : 'OFF'),
-              mode: (data.pumpMode || prev?.mode || 'AUTOMATIC') as any,
-              current_draw_amps: Number(data.currentAmps ?? (isRunning ? 4.8 : 0.0)),
-              runtime_seconds: Number(data.runtimeSeconds ?? prev?.runtime_seconds ?? 0)
-            };
-          });
+          const hwState: PumpState = isRunning ? 'ON' : (data.pumpState === 'FAULT' ? 'FAULT' : 'OFF');
+          const hwMode = (data.pumpMode || 'AUTOMATIC') as any;
 
-          if (isRunning) {
+          const nowMs = Date.now();
+          let effectiveState: PumpState = hwState;
+          let effectiveMode: any = hwMode;
+
+          // Reconcile state lock
+          if (desiredPumpStateRef.current && (nowMs - desiredPumpStateRef.current.timestamp < 3000)) {
+            if (hwState === desiredPumpStateRef.current.state) {
+              desiredPumpStateRef.current = null;
+            } else {
+              effectiveState = desiredPumpStateRef.current.state;
+            }
+          }
+
+          // Reconcile mode lock
+          if (desiredModeRef.current && (nowMs - desiredModeRef.current.timestamp < 3000)) {
+            if (hwMode === desiredModeRef.current.mode) {
+              desiredModeRef.current = null;
+            } else {
+              effectiveMode = desiredModeRef.current.mode;
+            }
+          }
+
+          setPumpStatus(prev => ({
+            ...(prev || {
+              id: 'ps_live',
+              device_id: data.deviceId || selectedDevice?.id || '',
+              mode: effectiveMode,
+              runtime_seconds: 0,
+              changed_at: new Date().toISOString(),
+              changed_by: 'HARDWARE_TELEMETRY'
+            }),
+            pump_state: effectiveState,
+            mode: effectiveMode,
+            current_draw_amps: effectiveState === 'ON' ? Number(data.currentAmps ?? 4.8) : 0.0,
+            runtime_seconds: Number(data.runtimeSeconds ?? prev?.runtime_seconds ?? 0)
+          }));
+
+          if (effectiveState === 'ON' || effectiveState === 'OFF') {
             setCommandPending(false);
           }
         }
@@ -585,11 +633,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const cmdId = `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const cmdPayload = JSON.stringify({
       cmd_id: cmdId,
-      command: actionStr,
+      command_id: cmdId,
       command_type: cmdType,
+      command: actionStr,
+      action: actionStr,
       auth_token: 'WPC_AUTH_SECURE_KEY_2026',
-      payload,
-      timestamp: Math.floor(Date.now() / 1000)
+      source: 'web_direct_client',
+      timestamp: Date.now(),
+      ...payload
     });
 
     if (mqttClientRef.current && mqttClientRef.current.connected) {
@@ -604,22 +655,23 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const startPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
-    lastActionTimeRef.current = Date.now();
+    const now = Date.now();
+    lastActionTimeRef.current = now;
+    desiredPumpStateRef.current = { state: 'ON', timestamp: now };
     setCommandPending(false);
     setCommandStatusText('');
 
-    // 1. Instant optimistic state update on frontend
+    // 1. Instant optimistic state update on frontend (preserves active mode)
     setPumpStatus(prev => ({
       ...(prev || {
         id: 'ps_live',
         device_id: dev.id,
-        mode: 'MANUAL',
+        mode: 'AUTOMATIC',
         runtime_seconds: 0,
         changed_at: new Date().toISOString(),
         changed_by: 'WEB_OPERATOR'
       }),
       pump_state: 'ON',
-      mode: prev?.mode === 'AUTOMATIC' ? 'AUTOMATIC' : 'MANUAL',
       current_draw_amps: 4.8
     }));
 
@@ -636,7 +688,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const stopPump = async () => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
-    lastActionTimeRef.current = Date.now();
+    const now = Date.now();
+    lastActionTimeRef.current = now;
+    desiredPumpStateRef.current = { state: 'OFF', timestamp: now };
     setCommandPending(false);
     setCommandStatusText('');
 
@@ -645,7 +699,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ...(prev || {
         id: 'ps_live',
         device_id: dev.id,
-        mode: 'MANUAL',
+        mode: 'AUTOMATIC',
         runtime_seconds: 0,
         changed_at: new Date().toISOString(),
         changed_by: 'WEB_OPERATOR'
@@ -667,7 +721,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const setMode = async (mode: string) => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
-    lastActionTimeRef.current = Date.now();
+    const now = Date.now();
+    lastActionTimeRef.current = now;
+    desiredModeRef.current = { mode, timestamp: now };
 
     // 1. Instant 0ms Optimistic UI Update
     setPumpStatus(prev => prev ? { ...prev, mode: mode as any } : null);
@@ -683,7 +739,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const emergencyStop = async (reason?: string) => {
     const dev = selectedDeviceRef.current || selectedDevice;
     if (!dev) return;
-    lastActionTimeRef.current = Date.now();
+    const now = Date.now();
+    lastActionTimeRef.current = now;
+    desiredPumpStateRef.current = { state: 'FAULT', timestamp: now };
     setCommandPending(false);
     setCommandStatusText('');
 
@@ -708,6 +766,39 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ApiService.emergencyStop(dev.id, reason || 'Operator UI E-Stop')
       .catch((err: any) => {
         console.warn('[DeviceContext] Backend emergencyStop notification note:', err.message);
+      });
+  };
+
+  const resetLockout = async () => {
+    const dev = selectedDeviceRef.current || selectedDevice;
+    if (!dev) return;
+    const now = Date.now();
+    lastActionTimeRef.current = now;
+    desiredPumpStateRef.current = { state: 'OFF', timestamp: now };
+    setCommandPending(false);
+    setCommandStatusText('');
+
+    // 1. Instant 0ms Optimistic UI Update (restore pump to Standby/OFF)
+    setPumpStatus(prev => ({
+      ...(prev || {
+        id: 'ps_live',
+        device_id: dev.id,
+        mode: 'MANUAL',
+        runtime_seconds: 0,
+        changed_at: new Date().toISOString(),
+        changed_by: 'OPERATOR_RESET'
+      }),
+      pump_state: 'OFF',
+      current_draw_amps: 0.0
+    }));
+
+    // 2. Direct Instant MQTT Command dispatch
+    publishDirectMqttCommand('CLEAR_FAULT', 'CLEAR_FAULT');
+
+    // 3. Parallel REST API notification
+    ApiService.resetLockout(dev.id, user?.email || 'web_operator')
+      .catch((err: any) => {
+        console.warn('[DeviceContext] Backend resetLockout notification note:', err.message);
       });
   };
 
@@ -763,6 +854,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         stopPump,
         setMode,
         emergencyStop,
+        resetLockout,
         acknowledgeAlert
       }}
     >

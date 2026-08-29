@@ -41,22 +41,6 @@ export class PumpControlService {
     const commandId = uuidv4();
     const payload = params.payload || {};
 
-    // Validate Auto High-Level Cutoff (only blocks in AUTOMATIC mode)
-    if (params.commandType === 'START_PUMP') {
-      const currentStatus = await this.getPumpStatus(device.id);
-      if (currentStatus?.mode === 'AUTOMATIC') {
-        const latestReading = await db.queryOne<{ water_level_percentage: number }>(
-          'SELECT water_level_percentage FROM sensor_readings WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1',
-          [device.id]
-        );
-        if (latestReading && Number(latestReading.water_level_percentage) >= 95.0) {
-          throw new Error(
-            `AUTOMATION SAFETY LOCK: Cannot start pump in AUTOMATIC mode because water level (${latestReading.water_level_percentage}%) has reached maximum auto cutoff (>= 95%). Switch to MANUAL mode to override.`
-          );
-        }
-      }
-    }
-
     // Record command in database with status 'pending'
     await db.execute(
       `INSERT INTO device_commands (id, device_id, command_type, payload, status, requested_by, created_at)
@@ -79,28 +63,21 @@ export class PumpControlService {
 
     // Set pending transition state in database and broadcast to all connected clients
     const isAutomation = params.source === 'automation' || params.requestedBy === 'SYSTEM_AUTOMATION';
-    const targetMode = payload.mode || (isAutomation ? 'AUTOMATIC' : undefined);
+    const currentStatus = await this.getPumpStatus(device.id);
+    const targetMode = payload.mode || (isAutomation ? 'AUTOMATIC' : (currentStatus?.mode || 'AUTOMATIC'));
 
     if (params.commandType === 'START_PUMP') {
-      const modeToSet = targetMode || 'MANUAL';
       await db.execute(
         `UPDATE pump_status SET pump_state = 'STARTING', mode = ?, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
-        [modeToSet, params.requestedBy, device.id]
+        [targetMode, params.requestedBy, device.id]
       );
       const updatedStatus = await this.getPumpStatus(device.id);
       if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
     } else if (params.commandType === 'STOP_PUMP') {
-      if (targetMode) {
-        await db.execute(
-          `UPDATE pump_status SET pump_state = 'STOPPING', mode = ?, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
-          [targetMode, params.requestedBy, device.id]
-        );
-      } else {
-        await db.execute(
-          `UPDATE pump_status SET pump_state = 'STOPPING', changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
-          [params.requestedBy, device.id]
-        );
-      }
+      await db.execute(
+        `UPDATE pump_status SET pump_state = 'STOPPING', mode = ?, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
+        [targetMode, params.requestedBy, device.id]
+      );
       const updatedStatus = await this.getPumpStatus(device.id);
       if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
     } else if (params.commandType === 'EMERGENCY_STOP') {
@@ -117,13 +94,21 @@ export class PumpControlService {
       );
       const updatedStatus = await this.getPumpStatus(device.id);
       if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
+    } else if ((params.commandType as any) === 'CLEAR_FAULT' || (params.commandType as any) === 'RESET_LOCKOUT') {
+      await db.execute(
+        `UPDATE pump_status SET pump_state = 'OFF', current_draw_amps = 0.0, changed_at = datetime('now'), changed_by = ? WHERE device_id = ?`,
+        [params.requestedBy, device.id]
+      );
+      const updatedStatus = await this.getPumpStatus(device.id);
+      if (updatedStatus) wsHub.broadcastPumpState(device.device_uid, updatedStatus);
     }
 
     // Map Action for ESP32 Firmware
     const actionStr = params.commandType === 'START_PUMP' ? 'START' :
                       params.commandType === 'STOP_PUMP' ? 'STOP' :
                       params.commandType === 'EMERGENCY_STOP' ? 'EMERGENCY_STOP' :
-                      params.commandType === 'SET_MODE' ? 'SET_MODE' : params.commandType;
+                      params.commandType === 'SET_MODE' ? 'SET_MODE' :
+                      ((params.commandType as any) === 'CLEAR_FAULT' || (params.commandType as any) === 'RESET_LOCKOUT') ? 'CLEAR_FAULT' : params.commandType;
 
     // Publish command over MQTT to ESP32 Main Node
     mqttBridge.publishCommand(device.device_uid, {

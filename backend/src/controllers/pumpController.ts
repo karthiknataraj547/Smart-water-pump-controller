@@ -85,6 +85,22 @@ export async function emergencyStop(req: AuthenticatedRequest, res: Response): P
   }
 }
 
+export async function resetLockout(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const source = (req.body.source || 'web') as any;
+    const result = await pumpControlService.sendPumpCommand({
+      deviceId: req.params.deviceId,
+      commandType: 'CLEAR_FAULT' as any,
+      payload: { reason: req.body.reason || 'Operator UI Reset Fault Lockout' },
+      requestedBy: req.user?.name || req.user?.email || 'OPERATOR',
+      source
+    });
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: { code: 'COMMAND_ERROR', message: err.message } });
+  }
+}
+
 export async function handleHardwareAckHttp(req: any, res: Response): Promise<void> {
   try {
     const { device_uid, status, confirmed_state, current_amps, runtime_seconds, error_message, command_id } = req.body;
