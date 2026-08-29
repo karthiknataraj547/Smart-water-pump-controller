@@ -92,6 +92,12 @@ function getWsUrl(token: string | null): string | null {
 
 export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { token, user } = useAuth();
+  const userAuthCode = useMemo(() => computeUserAuthCode(user), [user]);
+  const userRef = useRef(user);
+  userRef.current = user;
+  const userAuthCodeRef = useRef(userAuthCode);
+  userAuthCodeRef.current = userAuthCode;
+
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [pumpStatus, setPumpStatus] = useState<PumpStatus | null>(null);
@@ -316,21 +322,30 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // =========================================================================
             // STRICT PER-ACCOUNT HARDWARE BARRIER & AUTH CODE ISOLATION
             // =========================================================================
+            const activeUser = userRef.current;
+            const activeAuthCode = userAuthCodeRef.current || (activeUser ? computeUserAuthCode(activeUser) : 'WPC-AUTH-DEFAULT');
+
+            // While user profile is loading, do not eject devices
+            if (!activeUser && activeAuthCode === 'WPC-AUTH-DEFAULT') {
+              return;
+            }
+
             const incomingAuth = (data.auth_code || data.owner_id || data.user_auth_id || '').toString().trim();
             const isAuthMatch = Boolean(
-              userAuthCode && incomingAuth && (
-                incomingAuth === userAuthCode ||
-                (user && incomingAuth === user.id) ||
-                (user && incomingAuth.toLowerCase() === user.email.toLowerCase()) ||
-                (user && incomingAuth === `WPC_AUTH_${user.id}`)
+              incomingAuth && activeAuthCode !== 'WPC-AUTH-DEFAULT' && (
+                incomingAuth === activeAuthCode ||
+                (activeUser && incomingAuth === activeUser.id) ||
+                (activeUser && activeUser.email && incomingAuth.toLowerCase() === activeUser.email.toLowerCase()) ||
+                (activeUser && incomingAuth === `WPC_AUTH_${activeUser.id}`) ||
+                (activeUser && incomingAuth === `WPC-AUTH-${(activeUser.id || activeUser.email || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16)}`)
               )
             );
 
-            // If hardware broadcasts an auth_code that belongs to ANOTHER account or is UNPROVISIONED:
-            if (incomingAuth && !isAuthMatch) {
+            // If hardware broadcasts an auth_code that belongs to ANOTHER account (and definitely not this account):
+            if (incomingAuth && incomingAuth !== 'UNPROVISIONED' && !isAuthMatch && activeAuthCode !== 'WPC-AUTH-DEFAULT') {
               // Eject from active account if it was previously cached or in devicesRef
               if (devicesRef.current.some(d => d.device_uid === deviceUid)) {
-                console.warn(`[Security Barrier] Hardware ${deviceUid} has Auth Code '${incomingAuth}' which does NOT match active Account Auth Code '${userAuthCode}'. Ejecting device from this account.`);
+                console.warn(`[Security Barrier] Hardware ${deviceUid} has Auth Code '${incomingAuth}' which does NOT match active Account Auth Code '${activeAuthCode}'. Ejecting device from this account.`);
                 setDevices(prev => prev.filter(d => d.device_uid !== deviceUid));
                 devicesRef.current = devicesRef.current.filter(d => d.device_uid !== deviceUid);
                 if (selectedDeviceRef.current?.device_uid === deviceUid) {
@@ -346,14 +361,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             let targetDev = devicesRef.current.find(d => d.device_uid === deviceUid);
 
             // DYNAMIC HARDWARE AUTO-DETECTION BY ACCOUNT AUTH CODE:
-            if (!targetDev && isAuthMatch && deviceUid && user) {
-              console.log(`[DeviceContext] ✓ Auto-Adopting Hardware ${deviceUid} strictly bound to Account Auth Code (${userAuthCode})`);
+            if (!targetDev && isAuthMatch && deviceUid && activeUser) {
+              console.log(`[DeviceContext] ✓ Auto-Adopting Hardware ${deviceUid} strictly bound to Account Auth Code (${activeAuthCode})`);
               const autoDevice: Device = {
-                id: `dev_${deviceUid.toLowerCase()}_${user.id.slice(-6)}`,
+                id: `dev_${deviceUid.toLowerCase()}_${activeUser.id.slice(-6)}`,
                 device_uid: deviceUid,
                 serial_number: `SN-2026-ESP32-${deviceUid.slice(-4)}`,
                 device_type: 'ESP32_MAIN_CONTROLLER',
-                owner_id: user.id,
+                owner_id: activeUser.id,
                 status: 'online',
                 firmware_version: 'v2.1.0',
                 local_ip: data.local_ip || '192.168.31.53',
@@ -905,8 +920,6 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       alert(`Could not acknowledge alert: ${err.message}`);
     }
   };
-
-  const userAuthCode = useMemo(() => computeUserAuthCode(user), [user]);
 
   const claimHardware = useCallback(async (deviceUidInput: string, customName?: string) => {
     if (!deviceUidInput || deviceUidInput.trim().length === 0) {
