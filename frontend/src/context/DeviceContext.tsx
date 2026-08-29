@@ -271,7 +271,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker! Subscribing to account telemetry and global discovery...');
           setMqttConnected(true);
           
-          // 1. Subscribe to registered account devices
+          // 1. Subscribe ONLY to this account's registered devices (Strict Account Isolation)
           if (devicesRef.current.length > 0) {
             devicesRef.current.forEach(d => {
               client.subscribe(`devices/${d.device_uid}/telemetry`);
@@ -281,12 +281,6 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             });
           }
 
-          // 2. Global discovery to automatically detect and link hardware matching this Account's Auth Code
-          client.subscribe('devices/+/telemetry');
-          client.subscribe('devices/+/ack');
-          client.subscribe('devices/+/status');
-          client.subscribe('aquacontrol/telemetry');
-          client.subscribe('aquacontrol/+/telemetry');
           client.subscribe('aquacontrol/ownership/#');
         });
 
@@ -371,39 +365,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               return;
             }
 
-            // Check if this device is already in devicesRef
-            let targetDev = devicesRef.current.find(d => d.device_uid === deviceUid);
-
-            // DYNAMIC HARDWARE AUTO-DETECTION BY ACCOUNT AUTH CODE:
-            if (!targetDev && isAuthMatch && deviceUid && activeUser) {
-              console.log(`[DeviceContext] ✓ Auto-Adopting Hardware ${deviceUid} strictly bound to Account Auth Code (${activeAuthCode})`);
-              const autoDevice: Device = {
-                id: `dev_${deviceUid.toLowerCase()}_${activeUser.id.slice(-6)}`,
-                device_uid: deviceUid,
-                serial_number: `SN-2026-ESP32-${deviceUid.slice(-4)}`,
-                device_type: 'ESP32_MAIN_CONTROLLER',
-                owner_id: activeUser.id,
-                status: 'online',
-                firmware_version: 'v2.1.0',
-                local_ip: data.local_ip || '192.168.31.53',
-                mac_address: data.mac_address || '24:6F:28:A8:1F:29',
-                tank_capacity_liters: 2000,
-                tank_height_cm: 180,
-                last_seen: new Date().toISOString()
-              };
-
-              targetDev = autoDevice;
-              setDevices(prev => {
-                if (prev.some(d => d.device_uid === deviceUid)) return prev;
-                const updated = [...prev, autoDevice];
-                devicesRef.current = updated;
-                return updated;
-              });
-              setSelectedDevice(autoDevice);
-            }
+            // Check if this device is registered in this account's devicesRef
+            let targetDev = devicesRef.current.find(d => d.device_uid === deviceUid || d.id === deviceUid);
 
             if (!targetDev) {
-              // Hardware does not belong to this account
+              // Hardware is not registered in this account. Strictly ignore and drop packet.
               return;
             }
 

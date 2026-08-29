@@ -116,37 +116,37 @@ export const DevicesView: React.FC = () => {
         </div>
       </div>
 
-      {/* Quick 1-Click Discovery Card (If no devices added yet) */}
+      {/* Empty State: Require Setup Wizard or Explicit Device ID */}
       {devices.length === 0 && (
         <div className="neu-card p-8 rounded-3xl text-center space-y-4 border border-cyan-500/30">
           <div className="w-14 h-14 rounded-2xl neu-inset mx-auto flex items-center justify-center text-cyan-400">
             <Cpu className="w-7 h-7" />
           </div>
           <h2 className="text-lg font-black text-white uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
-            NO HARDWARE ADDED YET
+            NO HARDWARE LINKED TO THIS ACCOUNT
           </h2>
           <p className="text-xs font-mono text-slate-400 max-w-md mx-auto">
-            Power on your ESP32 controller and click below to link it to your account in 1 click.
+            Hardware is strictly locked per account. Run the Setup Wizard to pair and bind your hardware to this account.
           </p>
 
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
               type="button"
-              onClick={() => handleAddDevice('WPC-A81F29')}
+              onClick={() => setShowBleWizard(true)}
               className="neu-btn neu-btn-primary px-6 py-3 rounded-2xl text-xs font-black uppercase flex items-center space-x-2 cursor-pointer"
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              <Sparkles className="w-4 h-4" />
-              <span>CONNECT ESP32 (WPC-A81F29)</span>
+              <Bluetooth className="w-4 h-4" />
+              <span>LAUNCH SETUP WIZARD (BLUETOOTH / WI-FI)</span>
             </button>
 
             <button
               type="button"
-              onClick={() => setShowBleWizard(true)}
+              onClick={() => setShowAddModal(true)}
               className="neu-btn px-6 py-3 rounded-2xl text-xs font-bold uppercase text-slate-300 hover:text-white flex items-center space-x-2 cursor-pointer"
             >
-              <Wifi className="w-4 h-4 text-cyan-400" />
-              <span>CONFIGURE WI-FI VIA BLUETOOTH</span>
+              <Plus className="w-4 h-4 text-cyan-400" />
+              <span>ENTER DEVICE ID MANUALLY</span>
             </button>
           </div>
         </div>
