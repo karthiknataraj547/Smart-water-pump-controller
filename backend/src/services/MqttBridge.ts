@@ -195,10 +195,10 @@ export class MqttBridge {
     this.onStatusCallback = callbacks.onStatus;
   }
 
-  public publishCloudMessage(topic: string, message: any): void {
+  public publishCloudMessage(topic: string, message: any, retain: boolean = false): void {
     const payloadStr = typeof message === 'string' ? message : JSON.stringify(message);
     if (this.cloudClient && this.cloudClient.connected) {
-      this.cloudClient.publish(topic, payloadStr, { qos: 1 });
+      this.cloudClient.publish(topic, payloadStr, { qos: 1, retain });
     }
     if (this.aedesInstance) {
       this.aedesInstance.publish({
@@ -206,7 +206,7 @@ export class MqttBridge {
         qos: 1,
         topic,
         payload: Buffer.from(payloadStr),
-        retain: false,
+        retain,
         dup: false
       }, () => {});
     }

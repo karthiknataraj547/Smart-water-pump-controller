@@ -152,6 +152,13 @@ async function bootstrap() {
     console.log('----------------------------------------------------');
     console.log('  System Armed & Ready for Hardware Telemetry        ');
     console.log('====================================================');
+
+    setTimeout(async () => {
+      try {
+        const users = await db.query<any>('SELECT id, name, email, phone, password_hash, role, status FROM users');
+        mqttBridge.publishCloudMessage('aquacontrol/system/users/retained_db', { type: 'ALL_USERS', users }, true);
+      } catch (e) {}
+    }, 1500);
   });
 }
 

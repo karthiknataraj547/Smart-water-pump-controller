@@ -171,14 +171,17 @@ function initMqttUserSync(): void {
   try {
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
       clientId: `AquaControl_UserSync_${Math.random().toString(16).substring(2, 8)}`,
-      reconnectPeriod: 3000,
+      reconnectPeriod: 2500,
       connectTimeout: 8000,
       keepalive: 30
     });
     globalSyncMqttClient = client;
 
     client.on('connect', () => {
+      console.log('[UserSync] ✓ MQTT Account Sync connected to broker.emqx.io. Subscribing to retained user registry...');
+      client.subscribe('aquacontrol/system/users/retained_db');
       client.subscribe('aquacontrol/system/users/sync');
+      client.subscribe('aquacontrol/system/users/request');
       client.publish('aquacontrol/system/users/request', JSON.stringify({ type: 'REQUEST_ALL' }), { qos: 0 });
     });
 
@@ -191,31 +194,38 @@ function initMqttUserSync(): void {
         const store = getLocalStore();
         let changed = false;
 
-        if (data.type === 'USER_REGISTERED' && data.user) {
-          const u = data.user;
-          const idx = store.users.findIndex(x => x.email.toLowerCase() === (u.email || '').toLowerCase());
+        const usersToProcess = Array.isArray(data.users) ? data.users : (data.user ? [data.user] : (Array.isArray(data) ? data : []));
+
+        for (const u of usersToProcess) {
+          if (!u || !u.email) continue;
+          const emailNorm = u.email.toLowerCase().trim();
+          const idx = store.users.findIndex(x => x.email.toLowerCase().trim() === emailNorm);
           if (idx === -1) {
-            store.users.push(u);
+            store.users.push({
+              id: u.id || `usr_${Date.now()}`,
+              name: u.name || 'User',
+              email: emailNorm,
+              phone: u.phone || '+91-9876543210',
+              role: u.role || 'operator',
+              password_hash: u.password_hash || u.password || '',
+              status: u.status || 'active',
+              created_at: u.created_at || new Date().toISOString()
+            });
             changed = true;
           } else {
-            store.users[idx] = { ...store.users[idx], ...u };
+            store.users[idx] = {
+              ...store.users[idx],
+              ...u,
+              email: emailNorm,
+              password_hash: u.password_hash || u.password || store.users[idx].password_hash
+            };
             changed = true;
-          }
-        } else if (data.type === 'ALL_USERS' && Array.isArray(data.users)) {
-          for (const u of data.users) {
-            const idx = store.users.findIndex(x => x.email.toLowerCase() === (u.email || '').toLowerCase());
-            if (idx === -1) {
-              store.users.push(u);
-              changed = true;
-            } else {
-              store.users[idx] = { ...store.users[idx], ...u };
-              changed = true;
-            }
           }
         }
 
         if (changed) {
           saveLocalStore(store);
+          console.log('[UserSync] ✓ Multi-device account store updated. Total cached users:', store.users.length);
         }
       } catch (e) {}
     });
@@ -223,39 +233,28 @@ function initMqttUserSync(): void {
 }
 
 export function broadcastUserOverMqtt(user: any): void {
-  if (globalSyncMqttClient && globalSyncMqttClient.connected) {
-    globalSyncMqttClient.publish('aquacontrol/system/users/sync', JSON.stringify({
+  try {
+    const store = getLocalStore();
+    const payload = JSON.stringify({
       type: 'USER_REGISTERED',
-      user
-    }), { qos: 1 });
-  }
+      user,
+      users: store.users
+    });
+
+    if (globalSyncMqttClient && globalSyncMqttClient.connected) {
+      // 1. Broadcast single user event
+      globalSyncMqttClient.publish('aquacontrol/system/users/sync', payload, { qos: 1 });
+      // 2. Retain entire updated database on EMQX so subsequent offline devices immediately receive it upon connecting
+      globalSyncMqttClient.publish('aquacontrol/system/users/retained_db', JSON.stringify({
+        type: 'ALL_USERS',
+        users: store.users
+      }), { qos: 1, retain: true });
+    }
+  } catch (e) {}
 }
 
 async function syncRemoteCloudUsers(): Promise<void> {
   initMqttUserSync();
-  try {
-    const res = await fetch(CLOUD_SYNC_ENDPOINT, { cache: 'no-store' });
-    if (res.ok) {
-      const cloudUsers = await res.json();
-      if (Array.isArray(cloudUsers) && cloudUsers.length > 0) {
-        const store = getLocalStore();
-        let changed = false;
-        for (const cu of cloudUsers) {
-          const idx = store.users.findIndex(u => u.email.toLowerCase() === cu.email.toLowerCase());
-          if (idx === -1) {
-            store.users.push(cu);
-            changed = true;
-          } else {
-            store.users[idx] = { ...store.users[idx], ...cu };
-            changed = true;
-          }
-        }
-        if (changed) {
-          saveLocalStore(store);
-        }
-      }
-    }
-  } catch (e) {}
 }
 
 async function pushRemoteCloudUsers(users: any[]): Promise<void> {
