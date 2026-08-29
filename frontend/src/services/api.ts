@@ -457,18 +457,21 @@ export class ApiService {
     if (endpoint.startsWith('/devices/') && method === 'GET') {
       const parts = endpoint.split('/');
       const devIdOrUid = parts[parts.length - 1];
-      const found = store.devices.find(d => d.id === devIdOrUid || d.device_uid === devIdOrUid) || store.devices[0];
-      return Promise.resolve(found as any);
+      const found = store.devices.find(d => d.id === devIdOrUid || d.device_uid === devIdOrUid);
+      return Promise.resolve((found || null) as any);
     }
 
     // C. Pumps
     if (endpoint.includes('/pumps/') && endpoint.endsWith('/status')) {
-      const devId = store.devices[0]?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5';
-      return Promise.resolve(store.pumpStatus[devId] as any);
+      const parts = endpoint.split('/');
+      const devId = parts[2];
+      const status = store.pumpStatus[devId] || null;
+      return Promise.resolve(status as any);
     }
 
     if (endpoint.includes('/pumps/') && endpoint.endsWith('/start')) {
-      const devId = store.devices[0]?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5';
+      const parts = endpoint.split('/');
+      const devId = parts[2];
       if (store.pumpStatus[devId]) {
         store.pumpStatus[devId].pump_state = 'ON';
         store.pumpStatus[devId].current_draw_amps = 4.8;

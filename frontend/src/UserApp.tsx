@@ -71,7 +71,7 @@ export const UserApp: React.FC = () => {
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
           {/* Physical Hardware Offline Banner */}
-          {!isDeviceOnline && (
+          {selectedDevice && !isDeviceOnline && (
             <div className="p-4 neu-card border border-rose-500/40 bg-rose-950/20 rounded-2xl flex items-center justify-between animate-pulse">
               <div className="flex items-center space-x-3">
                 <div className="w-9 h-9 rounded-xl neu-inset flex items-center justify-center text-rose-400">
@@ -82,7 +82,7 @@ export const UserApp: React.FC = () => {
                     PHYSICAL HARDWARE CONTROLLER OFFLINE
                   </h3>
                   <p className="text-[11px] text-slate-400 font-mono">
-                    Awaiting live MQTT packets from <span className="text-white font-bold">{selectedDevice?.device_uid || 'WPC-A81F29'}</span> on <span className="text-cyan-400">broker.emqx.io</span> (Topic: <span className="text-emerald-400 font-mono">devices/{selectedDevice?.device_uid || 'WPC-A81F29'}/telemetry</span>).
+                    Awaiting live MQTT packets from <span className="text-white font-bold">{selectedDevice.device_uid}</span> on <span className="text-cyan-400">broker.emqx.io</span> (Topic: <span className="text-emerald-400 font-mono">devices/{selectedDevice.device_uid}/telemetry</span>).
                   </p>
                 </div>
               </div>
@@ -94,6 +94,29 @@ export const UserApp: React.FC = () => {
 
           {/* TAB 1: OVERVIEW DASHBOARD */}
           {activeTab === 'dashboard' && (
+            !selectedDevice ? (
+              <div className="p-8 sm:p-12 neu-card rounded-3xl border border-cyan-500/30 bg-slate-900/40 text-center space-y-5 my-8">
+                <div className="w-16 h-16 rounded-2xl neu-inset mx-auto flex items-center justify-center text-cyan-400">
+                  <Cpu className="w-8 h-8" />
+                </div>
+                <h2 className="text-xl font-extrabold text-white tracking-wide" style={{ fontFamily: 'var(--font-display)' }}>
+                  NO HARDWARE LINKED TO THIS ACCOUNT
+                </h2>
+                <p className="text-sm font-mono text-slate-400 max-w-lg mx-auto leading-relaxed">
+                  Your account ({user?.email || 'Active User'}) has strict hardware isolation. Hardware configured in other accounts will not appear here. Please link or setup your controller node.
+                </p>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('provisioning')}
+                    className="neu-btn neu-btn-primary px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider cursor-pointer shadow-lg shadow-cyan-950/50"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    + SETUP & LINK NEW HARDWARE CONTROLLER
+                  </button>
+                </div>
+              </div>
+            ) : (
             <div className="space-y-6">
               {/* Top Hero Grid: Giant Pump Controller + Liquid Wave Tank */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -190,6 +213,7 @@ export const UserApp: React.FC = () => {
                 </div>
               </div>
             </div>
+            )
           )}
 
           {/* TAB 2: PUMP CONTROL ROOM */}

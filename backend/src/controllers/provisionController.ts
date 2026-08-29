@@ -45,7 +45,7 @@ export async function scanBleDevices(req: any, res: Response): Promise<void> {
 
 export async function provisionDevice(req: any, res: Response): Promise<void> {
   try {
-    const { deviceUid, wifiSsid, serialNumber, tankCapacityLiters, tankHeightCm } = req.body;
+    const { deviceUid, wifiSsid, serialNumber, tankCapacityLiters, tankHeightCm, ownerId, userAuthId } = req.body;
 
     if (!deviceUid || !wifiSsid) {
       res.status(400).json({
@@ -55,7 +55,7 @@ export async function provisionDevice(req: any, res: Response): Promise<void> {
       return;
     }
 
-    const targetUserId = req.user?.id || 'usr_admin_001';
+    const targetUserId = req.user?.id || ownerId || userAuthId || 'usr_karthik_admin_001';
 
     let device = await deviceService.getDeviceByUid(deviceUid);
     if (!device) {

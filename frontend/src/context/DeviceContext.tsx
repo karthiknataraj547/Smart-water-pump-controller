@@ -188,6 +188,20 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     selectedDeviceRef.current = selectedDevice;
   }, [selectedDevice]);
 
+  // Dynamic Device Reference to Enforce Strict Per-Account Hardware Isolation
+  const devicesRef = useRef<Device[]>(devices);
+  useEffect(() => {
+    devicesRef.current = devices;
+    if (mqttClientRef.current && mqttClientRef.current.connected) {
+      devices.forEach(d => {
+        mqttClientRef.current?.subscribe(`devices/${d.device_uid}/telemetry`);
+        mqttClientRef.current?.subscribe(`devices/${d.device_uid}/ack`);
+        mqttClientRef.current?.subscribe(`devices/${d.device_uid}/status`);
+        mqttClientRef.current?.subscribe(`aquacontrol/${d.device_uid}/#`);
+      });
+    }
+  }, [devices]);
+
   // =========================================================================
   // CLOUD MQTT DIRECT WEBSOCKET CONNECTION (wss://broker.emqx.io:8084/mqtt)
   // =========================================================================
@@ -199,7 +213,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       try {
         const client = mqtt.connect(brokerWsUrl, {
           clientId: `AquaControl_Web_${Math.random().toString(16).substring(2, 8)}`,
-          username: 'WPC-A81F29',
+          username: user?.id || 'wpc_client',
           password: 'WPC_AUTH_SECURE_KEY_2026',
           reconnectPeriod: 2000,
           connectTimeout: 8000,
@@ -208,18 +222,18 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         mqttClientRef.current = client;
 
         client.on('connect', () => {
-          console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker (broker.emqx.io)! Subscribing to AquaControl topics...');
+          console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker! Subscribing strictly to account devices...');
           setMqttConnected(true);
-          // Subscribe specifically to target namespaces
-          client.subscribe('devices/WPC-A81F29/telemetry');
-          client.subscribe('devices/WPC-A81F29/ack');
-          client.subscribe('devices/WPC-A81F29/status');
-          client.subscribe('aquacontrol/WPC-A81F29/telemetry');
-          client.subscribe('aquacontrol/WPC-A81F29/ack');
-          client.subscribe('aquacontrol/WPC-A81F29/status');
-          client.subscribe('aquacontrol/telemetry');
-          client.subscribe('aquacontrol/status');
-          client.subscribe('aquacontrol/ack');
+          
+          // Subscribe ONLY to devices owned by the active logged-in user
+          if (devicesRef.current.length > 0) {
+            devicesRef.current.forEach(d => {
+              client.subscribe(`devices/${d.device_uid}/telemetry`);
+              client.subscribe(`devices/${d.device_uid}/ack`);
+              client.subscribe(`devices/${d.device_uid}/status`);
+              client.subscribe(`aquacontrol/${d.device_uid}/#`);
+            });
+          }
         });
 
         client.on('message', (topic: string, message: Buffer) => {
@@ -228,17 +242,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             if (!payloadStr || payloadStr.trim().length === 0) return;
             const data = JSON.parse(payloadStr);
 
-            // STRICT FILTER: Discard public messages from other strangers' devices
-            const isOurDevice = topic.includes('WPC-A81F29') || 
-                                topic.startsWith('aquacontrol') || 
-                                data.device_uid === 'WPC-A81F29' || 
-                                data.deviceUid === 'WPC-A81F29';
-
-            if (!isOurDevice) return;
-
-            console.log(`%c[AquaControl LIVE HW] Topic: '${topic}'`, 'color: #10b981; font-weight: bold;', data);
-
-            let deviceUid = data.device_uid || data.deviceUid || 'WPC-A81F29';
+            let deviceUid = data.device_uid || data.deviceUid;
             let subTopic = '';
 
             const parts = topic.split('/');
@@ -269,12 +273,22 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               }
             }
 
+            // STRICT ACCOUNT ISOLATION BARRIER:
+            // Check if this incoming hardware telemetry belongs to the active logged-in user!
+            const targetDev = devicesRef.current.find(d => d.device_uid === deviceUid || (selectedDeviceRef.current && selectedDeviceRef.current.device_uid === deviceUid));
+            if (!targetDev) {
+              // Hardware is NOT linked to this account! Discard packet immediately.
+              return;
+            }
+
+            console.log(`%c[AquaControl LIVE HW] Topic: '${topic}' for User Device: ${targetDev.device_uid}`, 'color: #10b981; font-weight: bold;', data);
+
             if (subTopic === 'telemetry' || data.water_level_pct !== undefined || data.water_level_percentage !== undefined) {
               const now = Date.now();
               lastTelemetryTimestampRef.current = now;
               setIsDeviceOnline(true);
-              setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
-              setDevices(prev => prev.map(d => d.device_uid === deviceUid ? { ...d, status: 'online' } : d));
+              setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : targetDev);
+              setDevices(prev => prev.map(d => d.device_uid === targetDev.device_uid ? { ...d, status: 'online' } : d));
 
               const isSubOnline = data.subnode_online !== undefined ? Boolean(data.subnode_online) : 
                                   (data.subNodeOnline !== undefined ? Boolean(data.subNodeOnline) : true);
@@ -283,67 +297,29 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               // Granular Water Level Sensor Probe Fault Detection
               const isUltrasonicFault = Boolean(data.water_level_fault) || 
                                         (data.ultrasonic_online === false) ||
-                                        (data.sensor_status === 'ULTRASONIC_FAULT') || 
-                                        (data.water_level_pct < 0);
-              const isLevelOk = isSubOnline && !isUltrasonicFault;
-              setIsWaterLevelSensorOnline(isLevelOk);
+                                        (data.sensor_status === 'ULTRASONIC_FAULT') ||
+                                        (data.sensor_fault === true);
+              setIsWaterLevelSensorOnline(!isUltrasonicFault);
+              setWaterLevelSensorError(isUltrasonicFault ? (data.water_level_error || 'Ultrasonic Sensor Probe Fault / No Echo') : null);
 
               if (isSubOnline) {
                 lastSubnodeTimestampRef.current = now;
                 setSubnodeError(null);
-
-                if (isUltrasonicFault) {
-                  setWaterLevelSensorError('Water Level Sensor Fault: Ultrasonic probe (JSN-SR04T) disconnected or not responding');
-                  setAlerts(prev => {
-                    if (prev.some(a => a.id === 'alert_ultrasonic_fault' && !a.acknowledged)) return prev;
-                    return [
-                      {
-                        id: 'alert_ultrasonic_fault',
-                        device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                        severity: 'warning',
-                        title: 'WATER LEVEL SENSOR HARDWARE FAULT',
-                        message: 'Sub-Node (ESP8266) is communicating via ESP-NOW, but the ultrasonic level probe (JSN-SR04T) is unplugged or returning invalid echoes.',
-                        acknowledged: false,
-                        created_at: new Date().toISOString()
-                      },
-                      ...prev
-                    ];
-                  });
-                } else {
-                  setWaterLevelSensorError(null);
-                }
               } else {
-                setSubnodeError('Tank Sub-Node Disconnected (ESP-NOW RF Link Lost)');
-                setWaterLevelSensorError('Sensor Unreachable (Sub-Node Disconnected)');
-                setAlerts(prev => {
-                  if (prev.some(a => a.id === 'alert_subnode_lost' && !a.acknowledged)) return prev;
-                  return [
-                    {
-                      id: 'alert_subnode_lost',
-                      device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
-                      severity: 'critical',
-                      title: 'TANK SENSOR SUB-NODE DISCONNECTED',
-                      message: 'Main controller is not receiving data from Tank Sub-Node (ESP8266). Water level and flow sensors are offline.',
-                      acknowledged: false,
-                      created_at: new Date().toISOString()
-                    },
-                    ...prev
-                  ];
-                });
+                setSubnodeError(data.subnode_error || 'Subnode Tank Transmitter Disconnected');
               }
 
-              const rawPct = Number(data.water_level_percentage ?? data.water_level_pct ?? data.waterLevelPercentage ?? 0);
-              const waterPct = isLevelOk ? Math.max(0, rawPct) : 0;
-              const waterLiters = isLevelOk ? Number(data.water_level_liters ?? data.waterLevelLiters ?? (waterPct * 20)) : 0;
-              const flowRate = isSubOnline ? Number(data.inflow_rate_lpm ?? data.flow_rate_lpm ?? data.inflowRateLpm ?? 0) : 0;
-              const totalLiters = isSubOnline ? Number(data.total_inflow_liters ?? data.total_inflow_l ?? data.totalInflowLiters ?? 0) : 0;
+              const waterPct = isSubOnline && !isUltrasonicFault ? Number(data.water_level_pct ?? data.water_level_percentage ?? 0) : 0;
+              const waterLiters = isSubOnline && !isUltrasonicFault ? Number(data.water_level_liters ?? (waterPct * 20)) : 0;
+              const flowRate = isSubOnline ? Number(data.flow_rate_lpm ?? data.inflow_rate_lpm ?? 0) : 0;
+              const totalLiters = isSubOnline ? Number(data.total_liters ?? data.total_inflow_liters ?? 0) : 0;
               const tds = isSubOnline ? Number(data.tds_ppm ?? data.tdsPpm ?? 0) : 0;
               const temp = isSubOnline ? Number(data.temperature_c ?? data.temperatureC ?? 25) : 0;
               const status = !isSubOnline ? 'SUBNODE_DISCONNECTED' : (isUltrasonicFault ? 'ULTRASONIC_FAULT' : (data.sensor_status || 'HEALTHY'));
 
               setTelemetry({
                 id: `tel_${now}`,
-                device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                device_id: targetDev.id,
                 water_level_percentage: waterPct,
                 water_level_liters: waterLiters,
                 inflow_rate_lpm: flowRate,
@@ -386,7 +362,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 setPumpStatus(prev => ({
                   ...(prev || {
                     id: 'ps_live',
-                    device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                    device_id: targetDev.id,
                     mode: effectiveMode,
                     runtime_seconds: 0,
                     changed_at: new Date().toISOString(),
@@ -413,7 +389,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               setPumpStatus(prev => ({
                 ...(prev || {
                   id: 'ps_live',
-                  device_id: selectedDeviceRef.current?.id || '97511f3d-e3b7-4b75-876f-b11b259f86d5',
+                  device_id: targetDev.id,
                   mode: 'AUTOMATIC',
                   runtime_seconds: 0,
                   changed_at: new Date().toISOString(),
@@ -553,15 +529,18 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsDeviceOnline(false);
       }
     } else if (event === 'TELEMETRY_UPDATE') {
+      const isOwned = devicesRef.current.some(d => d.device_uid === data.deviceUid);
+      if (!isOwned) return;
+
       lastTelemetryTimestampRef.current = Date.now();
       setIsDeviceOnline(true);
       setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
       setDevices(prev => prev.map(d => d.device_uid === data.deviceUid ? { ...d, status: 'online' } : d));
       
-      if (!selectedDevice || data.deviceUid === selectedDevice.device_uid) {
+      if (selectedDevice && data.deviceUid === selectedDevice.device_uid) {
         setTelemetry({
           id: data.readingId || 'latest',
-          device_id: data.deviceId || selectedDevice?.id || '',
+          device_id: data.deviceId || selectedDevice.id,
           water_level_percentage: Number(data.waterLevelPercentage ?? 0),
           water_level_liters: Number(data.waterLevelLiters ?? 0),
           inflow_rate_lpm: Number(data.inflowRateLpm ?? 0),
@@ -570,7 +549,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           temperature_c: Number(data.temperatureC ?? 25),
           sensor_status: data.sensorStatus || 'HEALTHY',
           created_at: data.timestamp || new Date().toISOString()
-        });        if (data.pumpState !== undefined || typeof data.pumpRunning === 'boolean') {
+        });
+
+        if (data.pumpState !== undefined || typeof data.pumpRunning === 'boolean') {
           const isRunning = data.pumpRunning === true || data.pumpState === 'ON';
           const hwState: PumpState = isRunning ? 'ON' : (data.pumpState === 'FAULT' ? 'FAULT' : 'OFF');
           const hwMode = (data.pumpMode || 'AUTOMATIC') as any;
@@ -600,7 +581,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setPumpStatus(prev => ({
             ...(prev || {
               id: 'ps_live',
-              device_id: data.deviceId || selectedDevice?.id || '',
+              device_id: data.deviceId || selectedDevice.id,
               mode: effectiveMode,
               runtime_seconds: 0,
               changed_at: new Date().toISOString(),
@@ -618,9 +599,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
     } else if (event === 'PUMP_STATE_CHANGED') {
+      const isOwned = devicesRef.current.some(d => d.device_uid === data.deviceUid);
+      if (!isOwned) return;
+
       setSelectedDevice(prev => prev ? { ...prev, status: 'online' } : prev);
       setDevices(prev => prev.map(d => d.device_uid === data.deviceUid ? { ...d, status: 'online' } : d));
-      if (!selectedDevice || data.deviceUid === selectedDevice.device_uid) {
+      if (selectedDevice && data.deviceUid === selectedDevice.device_uid) {
         setPumpStatus(prev => ({
           ...(prev || {}),
           ...data
@@ -630,7 +614,10 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
     } else if (event === 'NEW_ALERT') {
-      setAlerts(prev => [data, ...prev]);
+      const isOwned = !data.deviceId || devicesRef.current.some(d => d.id === data.deviceId || d.device_uid === data.deviceId);
+      if (isOwned) {
+        setAlerts(prev => [data, ...prev]);
+      }
     }
   };
 

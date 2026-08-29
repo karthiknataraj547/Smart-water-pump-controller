@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ApiService } from '../../services/api';
 import { useDevice } from '../../context/DeviceContext';
+import { useAuth } from '../../context/AuthContext';
 import { BleScanResult } from '../../types';
 import {
   Bluetooth,
@@ -17,6 +18,7 @@ import {
 
 export const ProvisioningWizard: React.FC = () => {
   const { refreshDevices } = useDevice();
+  const { user } = useAuth();
   const [step, setStep] = useState<number>(1);
   const [scanning, setScanning] = useState<boolean>(false);
   const [discoveredDevices, setDiscoveredDevices] = useState<BleScanResult[]>([]);
@@ -152,11 +154,12 @@ export const ProvisioningWizard: React.FC = () => {
 
     setProvisioning(true);
     setErrorMsg('');
-    setStatusMessage('1/3 Encoding Wi-Fi, MQTT & Auth Token...');
-    const authCode = 'WPC_AUTH_SECURE_KEY_2026';
+    setStatusMessage('1/3 Encoding Wi-Fi, MQTT & Account Auth Barrier...');
+    const userAuthId = user?.id || 'usr_karthik_admin_001';
+    const authCode = `WPC_AUTH_${userAuthId}`;
     const mqttBrokerHost = 'broker.emqx.io';
     const apiUrl = `http://${serverHost}:${serverPort}/api/v1`;
-    addLog(`Preparing Wi-Fi & Auth payload: SSID="${wifiSsid}", Broker="${mqttBrokerHost}:1883", API="${apiUrl}", Auth="${authCode}"`);
+    addLog(`Preparing Wi-Fi & Unique Account Auth payload (User ID: ${userAuthId})...`);
 
     // Streamlined compact payload to guarantee zero BLE MTU truncation
     const credPayload = JSON.stringify({
@@ -164,7 +167,9 @@ export const ProvisioningWizard: React.FC = () => {
       p: wifiPassword,
       b: mqttBrokerHost,
       h: serverHost.trim(),
-      auth: authCode
+      auth: authCode,
+      uid: userAuthId,
+      owner_id: userAuthId
     });
 
     let blePushed = false;
@@ -285,17 +290,19 @@ export const ProvisioningWizard: React.FC = () => {
       return;
     }
 
-    // Step C: Register Device in Central Cloud Database
+    // Step C: Register Device in Central Cloud Database Bound to Active User ID
     try {
-      setStatusMessage('3/3 Registering with Cloud Gateway & Arming Automation...');
-      addLog('Registering device metadata in Central Gateway DB...');
+      setStatusMessage('3/3 Registering with Cloud Gateway & Arming Account Lock...');
+      addLog(`Binding hardware UID ${selectedDevice.deviceUid} strictly to user account (${userAuthId})...`);
       await ApiService.completeProvisioning({
         deviceUid: selectedDevice.deviceUid,
         wifiSsid,
         tankCapacityLiters: tankCapacity,
-        tankHeightCm: tankHeight
-      });
-      addLog('✓ Central Gateway registration complete!');
+        tankHeightCm: tankHeight,
+        ownerId: userAuthId,
+        userAuthId: userAuthId
+      } as any);
+      addLog('✓ Central Gateway registration complete! Hardware locked to your account.');
     } catch (cloudErr: any) {
       addLog(`⚠️ Cloud registration note: ${cloudErr.message}`);
     }
@@ -321,12 +328,15 @@ export const ProvisioningWizard: React.FC = () => {
     setStatusMessage(`Pushing Wi-Fi credentials to ESP32 at http://${targetHost}...`);
     addLog(`Sending Wi-Fi credentials to http://${targetHost}/api/v1/wifi/config...`);
 
+    const userAuthId = user?.id || 'usr_karthik_admin_001';
     const payload = {
       s: wifiSsid.trim(),
       p: wifiPassword,
       b: 'broker.emqx.io',
       h: serverHost.trim(),
-      auth: 'WPC_AUTH_SECURE_KEY_2026'
+      auth: `WPC_AUTH_${userAuthId}`,
+      uid: userAuthId,
+      owner_id: userAuthId
     };
 
     try {
@@ -342,11 +352,13 @@ export const ProvisioningWizard: React.FC = () => {
         
         try {
           await ApiService.completeProvisioning({
-            deviceUid: 'WPC-A81F29',
+            deviceUid: selectedDevice?.deviceUid || 'WPC-A81F29',
             wifiSsid,
             tankCapacityLiters: tankCapacity,
-            tankHeightCm: tankHeight
-          });
+            tankHeightCm: tankHeight,
+            ownerId: userAuthId,
+            userAuthId: userAuthId
+          } as any);
         } catch (e) {}
 
         await refreshDevices();
