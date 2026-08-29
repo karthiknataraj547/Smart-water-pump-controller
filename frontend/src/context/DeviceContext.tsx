@@ -98,7 +98,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => clearInterval(timer);
   }, []);
 
-  // Load devices on auth change
+  // Load devices on auth change (Strict Per-User Device Isolation)
   const refreshDevices = useCallback(async () => {
     try {
       const list = await ApiService.getDevices();
@@ -106,15 +106,22 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (list.length > 0) {
         setSelectedDevice(prev => {
           if (!prev) {
-            const wpc = list.find((d: Device) => d.device_uid === 'WPC-A81F29');
-            return wpc || list[0];
+            return list[0];
           }
           const found = list.find((d: Device) => d.id === prev.id);
           return found || list[0];
         });
+      } else {
+        setSelectedDevice(null);
+        setPumpStatus(null);
+        setTelemetry(null);
+        setRules([]);
+        setAlerts([]);
       }
     } catch (err) {
       console.warn('[DeviceContext] Error fetching devices:', err);
+      setDevices([]);
+      setSelectedDevice(null);
     }
   }, []);
 

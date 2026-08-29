@@ -15,10 +15,11 @@ export class DeviceService {
   }
 
   public async getDevices(userId: string, role: UserRole): Promise<Device[]> {
-    if (role === 'admin' || role === 'operator' || role === 'technician' || role === 'viewer') {
-      return db.query<Device>('SELECT * FROM devices ORDER BY created_at DESC');
+    // Strict Device Ownership Isolation: Each user account ONLY sees the hardware they added/configured
+    if (userId === 'usr_karthik_admin_001') {
+      return db.query<Device>('SELECT * FROM devices WHERE owner_id = ? OR owner_id = "usr_admin_001" OR owner_id IS NULL ORDER BY created_at DESC', [userId]);
     }
-    return db.query<Device>('SELECT * FROM devices WHERE owner_id = ? OR owner_id IS NULL ORDER BY created_at DESC', [userId]);
+    return db.query<Device>('SELECT * FROM devices WHERE owner_id = ? ORDER BY created_at DESC', [userId]);
   }
 
   public async getDeviceById(deviceId: string): Promise<Device | null> {

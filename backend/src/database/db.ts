@@ -129,10 +129,10 @@ export class DBManager {
 
     // 2. Seed Primary Karthik Nataraj Administrator Account if not present
     const existingKarthik = await this.queryOne<any>('SELECT * FROM users WHERE email = ?', ['karthiknataraj547@gmail.com']);
+    const karthikId = 'usr_karthik_admin_001';
     if (!existingKarthik) {
       console.log('[DB] Seeding primary administrator (karthiknataraj547@gmail.com)...');
-      const karthikId = 'usr_karthik_admin_001';
-      const karthikPassHash = bcrypt.hashSync('Admin@123456', 10);
+      const karthikPassHash = bcrypt.hashSync('karthik@547', 10);
       await this.execute(
         'INSERT INTO users (id, name, email, phone, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime("now"))',
         [karthikId, 'Karthik Nataraj', 'karthiknataraj547@gmail.com', '+91-9876543210', karthikPassHash, 'admin', 'active']
@@ -160,7 +160,7 @@ export class DBManager {
       await this.execute(
         `INSERT INTO devices (id, device_uid, serial_number, device_type, owner_id, status, firmware_version, local_ip, mac_address, tank_capacity_liters, tank_height_cm, last_seen, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [deviceId, deviceUid, 'SN-2026-ESP32-9921', 'ESP32_MAIN_CONTROLLER', adminId, 'online', 'v2.1.0', '192.168.31.54', '24:6F:28:A8:1F:29', 2000.0, 180.0]
+        [deviceId, deviceUid, 'SN-2026-ESP32-9921', 'ESP32_MAIN_CONTROLLER', karthikId, 'online', 'v2.1.0', '192.168.31.54', '24:6F:28:A8:1F:29', 2000.0, 180.0]
       );
 
       const subnodeId = uuidv4();
