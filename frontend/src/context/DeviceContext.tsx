@@ -313,49 +313,68 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               }
             }
 
+            // =========================================================================
+            // STRICT PER-ACCOUNT HARDWARE BARRIER & AUTH CODE ISOLATION
+            // =========================================================================
+            const incomingAuth = (data.auth_code || data.owner_id || data.user_auth_id || '').toString().trim();
+            const isAuthMatch = Boolean(
+              userAuthCode && incomingAuth && (
+                incomingAuth === userAuthCode ||
+                (user && incomingAuth === user.id) ||
+                (user && incomingAuth.toLowerCase() === user.email.toLowerCase()) ||
+                (user && incomingAuth === `WPC_AUTH_${user.id}`)
+              )
+            );
+
+            // If hardware broadcasts an auth_code that belongs to ANOTHER account or is UNPROVISIONED:
+            if (incomingAuth && !isAuthMatch) {
+              // Eject from active account if it was previously cached or in devicesRef
+              if (devicesRef.current.some(d => d.device_uid === deviceUid)) {
+                console.warn(`[Security Barrier] Hardware ${deviceUid} has Auth Code '${incomingAuth}' which does NOT match active Account Auth Code '${userAuthCode}'. Ejecting device from this account.`);
+                setDevices(prev => prev.filter(d => d.device_uid !== deviceUid));
+                devicesRef.current = devicesRef.current.filter(d => d.device_uid !== deviceUid);
+                if (selectedDeviceRef.current?.device_uid === deviceUid) {
+                  setSelectedDevice(null);
+                  setIsDeviceOnline(false);
+                }
+              }
+              // STRICTLY DROP THIS PACKET - Do not let unauthorized account process or show online
+              return;
+            }
+
             // Check if this device is already in devicesRef
-            let targetDev = devicesRef.current.find(d => d.device_uid === deviceUid || (selectedDeviceRef.current && selectedDeviceRef.current.device_uid === deviceUid));
+            let targetDev = devicesRef.current.find(d => d.device_uid === deviceUid);
 
             // DYNAMIC HARDWARE AUTO-DETECTION BY ACCOUNT AUTH CODE:
-            if (!targetDev && deviceUid && user) {
-              const incomingAuth = (data.auth_code || data.owner_id || data.user_auth_id || '').toString().trim();
-              const isMatch = (
-                incomingAuth === userAuthCode ||
-                incomingAuth === user.id ||
-                incomingAuth.toLowerCase() === user.email.toLowerCase() ||
-                incomingAuth === `WPC_AUTH_${user.id}`
-              );
+            if (!targetDev && isAuthMatch && deviceUid && user) {
+              console.log(`[DeviceContext] ✓ Auto-Adopting Hardware ${deviceUid} strictly bound to Account Auth Code (${userAuthCode})`);
+              const autoDevice: Device = {
+                id: `dev_${deviceUid.toLowerCase()}_${user.id.slice(-6)}`,
+                device_uid: deviceUid,
+                serial_number: `SN-2026-ESP32-${deviceUid.slice(-4)}`,
+                device_type: 'ESP32_MAIN_CONTROLLER',
+                owner_id: user.id,
+                status: 'online',
+                firmware_version: 'v2.1.0',
+                local_ip: data.local_ip || '192.168.31.53',
+                mac_address: data.mac_address || '24:6F:28:A8:1F:29',
+                tank_capacity_liters: 2000,
+                tank_height_cm: 180,
+                last_seen: new Date().toISOString()
+              };
 
-              if (isMatch) {
-                console.log(`[DeviceContext] ✓ Auto-Adopting Hardware ${deviceUid} matching Account Auth Code (${userAuthCode})`);
-                const autoDevice: Device = {
-                  id: `dev_${deviceUid.toLowerCase()}_${user.id.slice(-6)}`,
-                  device_uid: deviceUid,
-                  serial_number: `SN-2026-ESP32-${deviceUid.slice(-4)}`,
-                  device_type: 'ESP32_MAIN_CONTROLLER',
-                  owner_id: user.id,
-                  status: 'online',
-                  firmware_version: 'v2.1.0',
-                  local_ip: data.local_ip || '192.168.31.53',
-                  mac_address: data.mac_address || '24:6F:28:A8:1F:29',
-                  tank_capacity_liters: 2000,
-                  tank_height_cm: 180,
-                  last_seen: new Date().toISOString()
-                };
-
-                targetDev = autoDevice;
-                setDevices(prev => {
-                  if (prev.some(d => d.device_uid === deviceUid)) return prev;
-                  const updated = [...prev, autoDevice];
-                  devicesRef.current = updated;
-                  return updated;
-                });
-                setSelectedDevice(autoDevice);
-              }
+              targetDev = autoDevice;
+              setDevices(prev => {
+                if (prev.some(d => d.device_uid === deviceUid)) return prev;
+                const updated = [...prev, autoDevice];
+                devicesRef.current = updated;
+                return updated;
+              });
+              setSelectedDevice(autoDevice);
             }
 
             if (!targetDev) {
-              // Hardware belongs to another account and has different Auth Code
+              // Hardware does not belong to this account
               return;
             }
 
@@ -709,7 +728,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       command_type: cmdType,
       command: actionStr,
       action: actionStr,
-      auth_token: 'WPC_AUTH_SECURE_KEY_2026',
+      auth_code: userAuthCode,
+      auth_token: userAuthCode,
+      user_auth_id: userAuthCode,
+      owner_id: user?.id || userAuthCode,
+      user_email: user?.email,
       source: 'web_direct_client',
       timestamp: Date.now(),
       ...payload
@@ -955,6 +978,20 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [user, userAuthCode]);
 
   const unlinkHardware = useCallback(async (deviceId: string) => {
+    const target = devicesRef.current.find(d => d.id === deviceId || d.device_uid === deviceId) || selectedDevice;
+    const uid = target?.device_uid || deviceId;
+
+    if (mqttClientRef.current && mqttClientRef.current.connected && uid) {
+      const resetPayload = JSON.stringify({
+        command: 'RESET_AUTH',
+        action: 'RESET_AUTH',
+        auth_code: userAuthCode,
+        timestamp: Date.now()
+      });
+      mqttClientRef.current.publish(`devices/${uid}/commands`, resetPayload, { qos: 1 });
+      mqttClientRef.current.publish(`aquacontrol/${uid}/commands`, resetPayload, { qos: 1 });
+    }
+
     setDevices(prev => {
       const updated = prev.filter(d => d.id !== deviceId && d.device_uid !== deviceId);
       devicesRef.current = updated;
@@ -962,8 +999,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
     if (selectedDevice?.id === deviceId || selectedDevice?.device_uid === deviceId) {
       setSelectedDevice(null);
+      setIsDeviceOnline(false);
     }
-  }, [selectedDevice]);
+  }, [selectedDevice, userAuthCode]);
 
   const syncRulesToHardware = useCallback(async (rulesList?: AutomationRule[]) => {
     const activeRules = rulesList || rules;

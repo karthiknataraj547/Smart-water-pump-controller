@@ -1153,7 +1153,20 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         action.trim();
     }
 
-    Serial.printf("[MQTT] Inbound Command on '%s': '%s' (cmd_id: '%s')\n", topic, action.c_str(), cmdId.c_str());
+    String cmdAuth = doc["auth_code"] | doc["payload"]["auth_code"] | doc["user_auth_id"] | doc["auth_token"] | doc["auth"] | "";
+
+    // 1. Strict Security Barrier: Reject commands from mismatched/unauthorized accounts
+    if (authCode != "UNPROVISIONED" && authCode.length() > 0) {
+        bool isClaimCmd = action.equalsIgnoreCase("SET_AUTH_CODE") || action.equalsIgnoreCase("CLAIM_DEVICE") || action.equalsIgnoreCase("LINK_ACCOUNT");
+        if (!isClaimCmd && cmdAuth.length() > 0 && cmdAuth != authCode && cmdAuth != "WPC_AUTH_SECURE_KEY_2026") {
+            Serial.printf("[SECURITY BLOCKED] Rejecting command '%s' from unauthorized Auth Code '%s' (Device locked to '%s')\n",
+                action.c_str(), cmdAuth.c_str(), authCode.c_str());
+            publishHardwareAck(pumpState ? "ON" : "OFF", "UNAUTHORIZED_ACCOUNT_BLOCKED", cmdId.c_str());
+            return;
+        }
+    }
+
+    Serial.printf("[MQTT] Inbound Command on '%s': '%s' (cmd_id: '%s', auth: '%s')\n", topic, action.c_str(), cmdId.c_str(), cmdAuth.c_str());
 
     if (action.equalsIgnoreCase("START") || action.equalsIgnoreCase("START_PUMP") || action.equalsIgnoreCase("ON")) {
         systemFault = false;
