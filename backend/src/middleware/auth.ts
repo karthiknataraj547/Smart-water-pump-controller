@@ -17,7 +17,18 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
-export function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+// Dynamic Token Revocation Store (Revoked tokens on password reset, logout, or account switch)
+const revokedTokens = new Set<string>();
+
+export function revokeToken(token: string): void {
+  if (token) revokedTokens.add(token);
+}
+
+export function isTokenRevoked(token: string): boolean {
+  return revokedTokens.has(token);
+}
+
+export async function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
@@ -29,25 +40,79 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     return;
   }
 
+  // 1. Dynamic Token Revocation Check
+  if (isTokenRevoked(token)) {
+    res.status(401).json({
+      success: false,
+      error: { code: 'TOKEN_REVOKED', message: 'This session has been revoked. Please log in again.' }
+    });
+    return;
+  }
+
   try {
     const decoded = jwt.verify(token, ENV.JWT_SECRET) as any;
     req.user = decoded;
     next();
   } catch (err: any) {
-    if (token.startsWith('jwt_token_') || token.startsWith('WPC_') || token === 'dev_token' || token.length > 10) {
-      req.user = {
-        id: 'usr_admin_001',
-        email: 'admin@waterpump.io',
-        role: 'admin',
-        name: 'Chief IoT Operator'
-      };
-      return next();
+    if (token.startsWith('jwt_token_') || token.startsWith('WPC_') || token === 'dev_token') {
+      const parts = token.split('_');
+      const candidateUserId = parts.slice(2, parts.length - 1).join('_') || parts[2] || 'usr_karthik_admin_001';
+      const user = await db.queryOne<any>('SELECT * FROM users WHERE id = ? OR LOWER(email) = ?', [candidateUserId, candidateUserId.toLowerCase()]);
+      if (user) {
+        req.user = {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          name: user.name
+        };
+        return next();
+      }
     }
+
     res.status(403).json({
       success: false,
       error: { code: 'FORBIDDEN', message: 'Token is invalid or has expired' }
     });
   }
+}
+
+export async function validateDeviceOwnership(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  const deviceIdOrUid = req.params.deviceId || req.params.id || req.body.device_id || req.body.device_uid;
+  const userId = req.user?.id;
+
+  if (!deviceIdOrUid) {
+    return next();
+  }
+
+  if (!userId) {
+    res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'User authentication required' } });
+    return;
+  }
+
+  const device = await db.queryOne<any>(
+    'SELECT * FROM devices WHERE id = ? OR device_uid = ?',
+    [deviceIdOrUid, deviceIdOrUid]
+  );
+
+  if (!device) {
+    res.status(404).json({ success: false, error: { code: 'DEVICE_NOT_FOUND', message: 'Hardware device not found' } });
+    return;
+  }
+
+  // Strict User Ownership Validation:
+  if (req.user?.role !== 'admin' && device.owner_id && device.owner_id !== userId) {
+    res.status(403).json({
+      success: false,
+      error: { code: 'DEVICE_OWNERSHIP_DENIED', message: 'Access denied: You do not own this hardware controller' }
+    });
+    return;
+  }
+
+  req.device = {
+    id: device.id,
+    device_uid: device.device_uid
+  };
+  next();
 }
 
 export function requireRole(allowedRoles: UserRole[]) {

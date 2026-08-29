@@ -990,24 +990,32 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } catch (e) {}
     }
 
-    // 2. Dispatch cryptographic release command to ESP32 Hardware
-    if (mqttClientRef.current && mqttClientRef.current.connected && uid) {
-      const resetPayload = JSON.stringify({
-        command: 'RELEASE_AUTH',
-        action: 'RELEASE_AUTH',
-        auth_code: userAuthCode,
-        device_uid: uid,
-        timestamp: Date.now()
-      });
-      mqttClientRef.current.publish(`devices/${uid}/commands`, resetPayload, { qos: 1 });
-      mqttClientRef.current.publish(`aquacontrol/${uid}/commands`, resetPayload, { qos: 1 });
-      mqttClientRef.current.publish('aquacontrol/ownership/release', JSON.stringify({
-        event: 'HARDWARE_RELEASED',
-        device_uid: uid,
-        previous_owner_id: user?.id,
-        previous_auth_code: userAuthCode,
-        timestamp: Date.now()
-      }), { qos: 1 });
+    // 2. Dispatch cryptographic release command and unsubscribe MQTT topics
+    if (mqttClientRef.current && uid) {
+      if (mqttClientRef.current.connected) {
+        const resetPayload = JSON.stringify({
+          command: 'RELEASE_AUTH',
+          action: 'RELEASE_AUTH',
+          auth_code: userAuthCode,
+          device_uid: uid,
+          timestamp: Date.now()
+        });
+        mqttClientRef.current.publish(`devices/${uid}/commands`, resetPayload, { qos: 1 });
+        mqttClientRef.current.publish(`aquacontrol/${uid}/commands`, resetPayload, { qos: 1 });
+        mqttClientRef.current.publish('aquacontrol/ownership/release', JSON.stringify({
+          event: 'HARDWARE_RELEASED',
+          device_uid: uid,
+          previous_owner_id: user?.id,
+          previous_auth_code: userAuthCode,
+          timestamp: Date.now()
+        }), { qos: 1 });
+      }
+
+      // Explicitly clear MQTT WebSocket subscriptions for this hardware
+      mqttClientRef.current.unsubscribe(`devices/${uid}/telemetry`);
+      mqttClientRef.current.unsubscribe(`devices/${uid}/ack`);
+      mqttClientRef.current.unsubscribe(`devices/${uid}/status`);
+      mqttClientRef.current.unsubscribe(`aquacontrol/${uid}/#`);
     }
 
     // 3. Call backend API to delete the device link from this account

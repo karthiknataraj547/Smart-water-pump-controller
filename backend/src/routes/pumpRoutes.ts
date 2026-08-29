@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getPumpStatus, startPump, stopPump, setMode, emergencyStop, resetLockout, handleHardwareAckHttp } from '../controllers/pumpController';
-import { authenticateToken, requireRole } from '../middleware/auth';
+import { authenticateToken, requireRole, validateDeviceOwnership } from '../middleware/auth';
 
 const router = Router();
 
@@ -8,6 +8,8 @@ const router = Router();
 router.post('/ack', handleHardwareAckHttp);
 
 router.use(authenticateToken);
+router.use('/:deviceId', validateDeviceOwnership);
+
 router.get('/:deviceId/status', getPumpStatus);
 router.post('/:deviceId/start', requireRole(['admin', 'operator']), startPump);
 router.post('/:deviceId/stop', requireRole(['admin', 'operator']), stopPump);
