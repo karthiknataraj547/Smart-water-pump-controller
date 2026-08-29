@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 export const ProvisioningWizard: React.FC = () => {
-  const { refreshDevices } = useDevice();
+  const { refreshDevices, userAuthCode, claimHardware } = useDevice();
   const { user } = useAuth();
   const [step, setStep] = useState<number>(1);
   const [scanning, setScanning] = useState<boolean>(false);
@@ -156,10 +156,10 @@ export const ProvisioningWizard: React.FC = () => {
     setErrorMsg('');
     setStatusMessage('1/3 Encoding Wi-Fi, MQTT & Account Auth Barrier...');
     const userAuthId = user?.id || 'usr_karthik_admin_001';
-    const authCode = `WPC_AUTH_${userAuthId}`;
+    const effectiveAuthCode = userAuthCode || (user ? `WPC-AUTH-${(user.id || user.email || 'USER').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16)}` : 'WPC-AUTH-DEFAULT');
     const mqttBrokerHost = 'broker.emqx.io';
     const apiUrl = `http://${serverHost}:${serverPort}/api/v1`;
-    addLog(`Preparing Wi-Fi & Unique Account Auth payload (User ID: ${userAuthId})...`);
+    addLog(`Preparing Wi-Fi & Unique Account Auth payload (Auth Code: ${effectiveAuthCode})...`);
 
     // Streamlined compact payload to guarantee zero BLE MTU truncation
     const credPayload = JSON.stringify({
@@ -167,9 +167,11 @@ export const ProvisioningWizard: React.FC = () => {
       p: wifiPassword,
       b: mqttBrokerHost,
       h: serverHost.trim(),
-      auth: authCode,
+      auth: effectiveAuthCode,
+      auth_code: effectiveAuthCode,
       uid: userAuthId,
-      owner_id: userAuthId
+      owner_id: userAuthId,
+      user_email: user?.email
     });
 
     let blePushed = false;
@@ -293,15 +295,21 @@ export const ProvisioningWizard: React.FC = () => {
     // Step C: Register Device in Central Cloud Database Bound to Active User ID
     try {
       setStatusMessage('3/3 Registering with Cloud Gateway & Arming Account Lock...');
-      addLog(`Binding hardware UID ${selectedDevice.deviceUid} strictly to user account (${userAuthId})...`);
+      const devUid = selectedDevice.deviceUid || 'WPC-A81F29';
       await ApiService.completeProvisioning({
-        deviceUid: selectedDevice.deviceUid,
+        deviceUid: devUid,
         wifiSsid,
         tankCapacityLiters: tankCapacity,
         tankHeightCm: tankHeight,
         ownerId: userAuthId,
-        userAuthId: userAuthId
+        userAuthId: userAuthId,
+        authCode: effectiveAuthCode
       } as any);
+
+      try {
+        await claimHardware(devUid, `${wifiSsid} Station`);
+      } catch (e) {}
+
       addLog('✓ Central Gateway registration complete! Hardware locked to your account.');
     } catch (cloudErr: any) {
       addLog(`⚠️ Cloud registration note: ${cloudErr.message}`);
@@ -329,14 +337,22 @@ export const ProvisioningWizard: React.FC = () => {
     addLog(`Sending Wi-Fi credentials to http://${targetHost}/api/v1/wifi/config...`);
 
     const userAuthId = user?.id || 'usr_karthik_admin_001';
+    const effectiveAuthCode = userAuthCode || (user ? `WPC-AUTH-${(user.id || user.email || 'USER').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16)}` : 'WPC-AUTH-DEFAULT');
     const payload = {
       s: wifiSsid.trim(),
+      ssid: wifiSsid.trim(),
+      wifi_ssid: wifiSsid.trim(),
       p: wifiPassword,
+      password: wifiPassword,
+      wifi_password: wifiPassword,
       b: 'broker.emqx.io',
+      mqtt_broker: 'broker.emqx.io',
       h: serverHost.trim(),
-      auth: `WPC_AUTH_${userAuthId}`,
+      auth: effectiveAuthCode,
+      auth_code: effectiveAuthCode,
       uid: userAuthId,
-      owner_id: userAuthId
+      owner_id: userAuthId,
+      user_email: user?.email
     };
 
     try {
@@ -350,15 +366,21 @@ export const ProvisioningWizard: React.FC = () => {
         addLog('✓ REALTIME ACK: ESP32 acknowledged credentials over HTTP!');
         addLog('👉 Built-in LED on ESP32 (GPIO 2) will turn SOLID ON once connected to Wi-Fi.');
         
+        const devUid = selectedDevice?.deviceUid || 'WPC-A81F29';
         try {
           await ApiService.completeProvisioning({
-            deviceUid: selectedDevice?.deviceUid || 'WPC-A81F29',
+            deviceUid: devUid,
             wifiSsid,
             tankCapacityLiters: tankCapacity,
             tankHeightCm: tankHeight,
             ownerId: userAuthId,
-            userAuthId: userAuthId
+            userAuthId: userAuthId,
+            authCode: effectiveAuthCode
           } as any);
+        } catch (e) {}
+
+        try {
+          await claimHardware(devUid, `${wifiSsid} Station`);
         } catch (e) {}
 
         await refreshDevices();

@@ -282,7 +282,7 @@ void loadSavedCredentials() {
     mqttPort      = preferences.getInt("mqtt_port", DEFAULT_MQTT_PORT);
     apiServerHost = preferences.getString("api_host", DEFAULT_SERVER_HOST);
     apiServerPort = preferences.getInt("api_port", DEFAULT_SERVER_PORT);
-    authCode      = preferences.getString("auth_code", "WPC_AUTH_SECURE_KEY_2026");
+    authCode      = preferences.getString("auth_code", "UNPROVISIONED");
     preferences.end();
 
     if (wifiSsid.length() == 0 && strlen(DEFAULT_WIFI_SSID) > 0) {
@@ -309,7 +309,7 @@ void saveCredentials(const String& ssid, const String& pass, const String& broke
     if (aPort > 0) preferences.putInt("api_port", aPort);
     if (auth.length() > 0) preferences.putString("auth_code", auth);
     preferences.end();
-    Serial.printf("[NVS] Configuration saved to flash: SSID='%s', MQTT='%s:%d'\n", ssid.c_str(), broker.c_str(), mPort);
+    Serial.printf("[NVS] Configuration saved to flash: SSID='%s', MQTT='%s:%d', Auth='%s'\n", ssid.c_str(), broker.c_str(), mPort, auth.c_str());
 }
 
 // =====================================================================
@@ -339,7 +339,7 @@ void handleApplyCredentials(const String& rawInput) {
     int mPortVal = DEFAULT_MQTT_PORT;
     String newHost = DEFAULT_SERVER_HOST;
     int portVal = DEFAULT_SERVER_PORT;
-    String newAuth = "WPC_AUTH_SECURE_KEY_2026";
+    String newAuth = "UNPROVISIONED";
 
     // Format 1: Text format "WIFI:SSID:PASS" or "WIFI:SSID:PASS:BROKER"
     if (input.startsWith("WIFI:") || input.startsWith("wifi:")) {
@@ -361,7 +361,7 @@ void handleApplyCredentials(const String& rawInput) {
             const char* pVal = doc["p"] | doc["password"] | doc["wifi_password"] | doc["pass"] | "";
             const char* bVal = doc["b"] | doc["mqtt_broker"] | doc["mqtt_host"] | doc["broker"] | DEFAULT_MQTT_BROKER;
             const char* hVal = doc["h"] | doc["server_host"] | doc["api_host"] | bVal;
-            const char* aVal = doc["auth"] | doc["auth_code"] | doc["auth_token"] | "WPC_AUTH_SECURE_KEY_2026";
+            const char* aVal = doc["auth_code"] | doc["auth"] | doc["auth_token"] | doc["user_auth_id"] | "";
 
             newSsid = String(sVal);
             newPass = String(pVal);
@@ -369,7 +369,9 @@ void handleApplyCredentials(const String& rawInput) {
             mPortVal = doc["mqtt_port"] | DEFAULT_MQTT_PORT;
             newHost = String(hVal);
             portVal = doc["port"] | doc["server_port"] | doc["api_port"] | DEFAULT_SERVER_PORT;
-            newAuth = String(aVal);
+            if (strlen(aVal) > 0) {
+                newAuth = String(aVal);
+            }
         } else {
             Serial.printf("[PROVISION] JSON parse error: %s (Raw payload: '%s')\n", err.c_str(), input.c_str());
             return;
@@ -1239,6 +1241,17 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         systemFault = false;
         digitalWrite(PIN_LED_FAULT, LOW);
         publishHardwareAck("OFF", "FAULT_CLEARED", cmdId.c_str());
+    } else if (action.equalsIgnoreCase("FACTORY_RESET") || action.equalsIgnoreCase("RESET_AUTH") || action.equalsIgnoreCase("UNLINK_HARDWARE")) {
+        preferences.begin("pump_cfg", false);
+        preferences.clear();
+        preferences.end();
+        authCode = "UNPROVISIONED";
+        wifiSsid = "";
+        wifiPass = "";
+        Serial.println("[MQTT] ✓ Factory Reset Triggered! Cleared Auth Code and Wi-Fi credentials from NVS Flash.");
+        publishHardwareAck("OFF", "FACTORY_RESET_COMPLETE", cmdId.c_str());
+        delay(300);
+        ESP.restart();
     } else if (action.equalsIgnoreCase("PING")) {
         publishHardwareAck(pumpState ? "ON" : "OFF", "PONG", cmdId.c_str());
     }
