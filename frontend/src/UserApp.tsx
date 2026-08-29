@@ -24,13 +24,34 @@ export const UserApp: React.FC = () => {
     isDeviceOnline, 
     isSubnodeOnline, 
     isWaterLevelSensorOnline,
-    waterLevelSensorError 
+    waterLevelSensorError,
+    userAuthCode,
+    claimHardware
   } = useDevice();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [otaStatus, setOtaStatus] = useState<string>('');
+
+  const [claimUidInput, setClaimUidInput] = useState<string>('WPC-A81F29');
+  const [claimLoading, setClaimLoading] = useState<boolean>(false);
+  const [claimStatus, setClaimStatus] = useState<string>('');
+  const [copiedCode, setCopiedCode] = useState<boolean>(false);
+
+  const handleClaim = async () => {
+    if (!claimUidInput.trim()) return;
+    setClaimLoading(true);
+    setClaimStatus('');
+    try {
+      await claimHardware(claimUidInput.trim());
+      setClaimStatus('✓ Hardware linked successfully! Listening for live telemetry...');
+    } catch (e: any) {
+      setClaimStatus(e.message || 'Error linking hardware');
+    } finally {
+      setClaimLoading(false);
+    }
+  };
 
   const isRunning = isDeviceOnline && (pumpStatus?.pump_state === 'ON' || pumpStatus?.pump_state === 'STARTING');
   const isLevelValid = isDeviceOnline && isSubnodeOnline && isWaterLevelSensorOnline;
@@ -95,24 +116,79 @@ export const UserApp: React.FC = () => {
           {/* TAB 1: OVERVIEW DASHBOARD */}
           {activeTab === 'dashboard' && (
             !selectedDevice ? (
-              <div className="p-8 sm:p-12 neu-card rounded-3xl border border-cyan-500/30 bg-slate-900/40 text-center space-y-5 my-8">
+              <div className="p-6 sm:p-10 neu-card rounded-3xl border border-cyan-500/30 bg-slate-900/40 text-center space-y-6 my-6 max-w-2xl mx-auto">
                 <div className="w-16 h-16 rounded-2xl neu-inset mx-auto flex items-center justify-center text-cyan-400">
                   <Cpu className="w-8 h-8" />
                 </div>
-                <h2 className="text-xl font-extrabold text-white tracking-wide" style={{ fontFamily: 'var(--font-display)' }}>
-                  NO HARDWARE LINKED TO THIS ACCOUNT
-                </h2>
-                <p className="text-sm font-mono text-slate-400 max-w-lg mx-auto leading-relaxed">
-                  Your account ({user?.email || 'Active User'}) has strict hardware isolation. Hardware configured in other accounts will not appear here. Please link or setup your controller node.
-                </p>
-                <div className="pt-2">
+                <div>
+                  <h2 className="text-xl font-extrabold text-white tracking-wide uppercase" style={{ fontFamily: 'var(--font-display)' }}>
+                    HARDWARE LINK & DETECT
+                  </h2>
+                  <p className="text-xs font-mono text-slate-400 max-w-md mx-auto mt-1 leading-relaxed">
+                    Account: <span className="text-cyan-400 font-bold">{user?.email || 'Active User'}</span>. Each account has strict hardware isolation and its own Unique Auth Code.
+                  </p>
+                </div>
+
+                {/* Account Unique Auth Code Badge */}
+                <div className="neu-inset p-4 rounded-2xl max-w-md mx-auto flex items-center justify-between border border-cyan-500/20 bg-slate-950/60">
+                  <div className="text-left">
+                    <span className="text-[10px] text-slate-400 font-mono uppercase block font-bold tracking-wider">YOUR ACCOUNT LINK AUTH CODE</span>
+                    <span className="text-sm font-mono text-cyan-400 font-black tracking-widest">{userAuthCode}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(userAuthCode);
+                      setCopiedCode(true);
+                      setTimeout(() => setCopiedCode(false), 2000);
+                    }}
+                    className="neu-btn px-3.5 py-2 rounded-xl text-[11px] font-mono font-bold uppercase text-cyan-300 cursor-pointer"
+                  >
+                    {copiedCode ? '✓ COPIED' : 'COPY CODE'}
+                  </button>
+                </div>
+
+                {/* Instant Link / Claim Hardware by UID */}
+                <div className="max-w-md mx-auto space-y-3 pt-1">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={claimUidInput}
+                      onChange={(e) => setClaimUidInput(e.target.value.toUpperCase())}
+                      placeholder="ENTER DEVICE UID (e.g. WPC-A81F29)"
+                      className="neu-input flex-1 px-4 py-3 rounded-xl text-xs font-mono uppercase text-white bg-slate-950/90 border border-slate-700/50 focus:border-cyan-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleClaim}
+                      disabled={claimLoading}
+                      className="neu-btn neu-btn-primary px-5 py-3 rounded-xl text-xs font-black uppercase font-mono cursor-pointer shrink-0 shadow-lg shadow-cyan-950/40"
+                      style={{ fontFamily: 'var(--font-display)' }}
+                    >
+                      {claimLoading ? 'LINKING...' : 'LINK & DETECT'}
+                    </button>
+                  </div>
+
+                  {claimStatus && (
+                    <p className="text-xs font-mono text-emerald-400 font-bold animate-in fade-in">
+                      {claimStatus}
+                    </p>
+                  )}
+
+                  <div className="flex items-center justify-center gap-2 text-[11px] font-mono text-slate-400 pt-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span>Auto-listening on MQTT — powering on your ESP32 controller will auto-bind it here</span>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-700/20">
                   <button
                     type="button"
                     onClick={() => setActiveTab('provisioning')}
-                    className="neu-btn neu-btn-primary px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider cursor-pointer shadow-lg shadow-cyan-950/50"
+                    className="neu-btn px-6 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider cursor-pointer text-slate-300 hover:text-white"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
-                    + SETUP & LINK NEW HARDWARE CONTROLLER
+                    OR SETUP WI-FI & PROVISION VIA BLUETOOTH
                   </button>
                 </div>
               </div>

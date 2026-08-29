@@ -1227,6 +1227,14 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         publishHardwareAck(pumpState ? "ON" : "OFF", "RULES_SYNCED", cmdId.c_str());
     } else if (action.equalsIgnoreCase("EMERGENCY_STOP") || action.equalsIgnoreCase("ESTOP")) {
         triggerEmergencyStop("Remote Cloud E-Stop Command", cmdId.c_str());
+    } else if (action.equalsIgnoreCase("SET_AUTH_CODE") || action.equalsIgnoreCase("CLAIM_DEVICE") || action.equalsIgnoreCase("LINK_ACCOUNT")) {
+        String newAuth = doc["auth_code"] | doc["payload"]["auth_code"] | doc["user_auth_id"] | "";
+        if (newAuth.length() > 0) {
+            authCode = newAuth;
+            preferences.putString("auth_code", authCode);
+            Serial.printf("[MQTT] ✓ Hardware Account Re-linked! New Auth Code: %s\n", authCode.c_str());
+            publishHardwareAck(pumpState ? "ON" : "OFF", "ACCOUNT_LINKED", cmdId.c_str());
+        }
     } else if (action.equalsIgnoreCase("CLEAR_FAULT") || action.equalsIgnoreCase("RESET_FAULT") || action.equalsIgnoreCase("RESET_LOCKOUT") || action.equalsIgnoreCase("RESET")) {
         systemFault = false;
         digitalWrite(PIN_LED_FAULT, LOW);
@@ -1370,6 +1378,8 @@ void TaskNetworkLoop(void *parameter) {
                     doc["rssi"] = WiFi.RSSI();
                     doc["free_heap"] = ESP.getFreeHeap();
                     doc["uptime_seconds"] = millis() / 1000;
+                    doc["auth_code"] = authCode;
+                    doc["owner_id"] = authCode;
 
                     char buffer[512];
                     serializeJson(doc, buffer);

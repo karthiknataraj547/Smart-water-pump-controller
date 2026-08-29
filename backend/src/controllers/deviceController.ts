@@ -37,3 +37,14 @@ export async function updateDevice(req: AuthenticatedRequest, res: Response): Pr
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
   }
 }
+
+export async function claimDevice(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { device_uid, auth_code } = req.body;
+    const userId = req.user!.id;
+    const claimed = await deviceService.claimDevice(device_uid, userId, auth_code);
+    res.json({ success: true, data: claimed });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
+  }
+}

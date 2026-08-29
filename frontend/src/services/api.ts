@@ -483,6 +483,33 @@ export class ApiService {
       return Promise.resolve(userDevices as any);
     }
 
+    if (endpoint === '/devices/claim' && method === 'POST') {
+      const { device_uid, auth_code, owner_id } = body;
+      let existingDev = store.devices.find(d => d.device_uid === device_uid);
+      if (existingDev) {
+        existingDev.owner_id = owner_id;
+        (existingDev as any).auth_code = auth_code;
+      } else {
+        existingDev = {
+          id: `dev_${device_uid.toLowerCase()}_${Date.now()}`,
+          device_uid,
+          serial_number: `SN-2026-ESP32-${device_uid.slice(-4)}`,
+          device_type: 'ESP32_MAIN_CONTROLLER',
+          owner_id,
+          status: 'online',
+          firmware_version: 'v2.1.0',
+          local_ip: '192.168.31.53',
+          mac_address: '24:6F:28:A8:1F:29',
+          tank_capacity_liters: 2000,
+          tank_height_cm: 180,
+          last_seen: new Date().toISOString()
+        };
+        store.devices.push(existingDev);
+      }
+      saveLocalStore(store);
+      return Promise.resolve(existingDev as any);
+    }
+
     if (endpoint.startsWith('/devices/') && method === 'GET') {
       const parts = endpoint.split('/');
       const devIdOrUid = parts[parts.length - 1];
@@ -880,6 +907,13 @@ export class ApiService {
 
   static async completeProvisioning(payload: any) {
     return this.request('/devices/provision', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  static async claimDevice(payload: { device_uid: string; auth_code: string; owner_id: string }): Promise<any> {
+    return this.request('/devices/claim', {
       method: 'POST',
       body: JSON.stringify(payload)
     });

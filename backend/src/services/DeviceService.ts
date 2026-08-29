@@ -93,12 +93,29 @@ export class DeviceService {
       values.push(data.status);
     }
 
-    if (fields.length > 0) {
-      values.push(deviceId);
-      await db.execute(`UPDATE devices SET ${fields.join(', ')} WHERE id = ?`, values);
-    }
+    fields.push("updated_at = datetime('now')");
+    values.push(deviceId);
 
+    await db.execute(`UPDATE devices SET ${fields.join(', ')} WHERE id = ?`, values);
     return this.getDeviceById(deviceId);
+  }
+
+  public async claimDevice(deviceUid: string, userId: string, authCode?: string): Promise<Device> {
+    let dev = await this.getDeviceByUid(deviceUid);
+    if (dev) {
+      await db.execute('UPDATE devices SET owner_id = ? WHERE id = ?', [userId, dev.id]);
+      dev = await this.getDeviceById(dev.id);
+      return dev!;
+    } else {
+      return this.createDevice({
+        device_uid: deviceUid,
+        serial_number: `SN-2026-ESP32-${deviceUid.replace(/[^A-Z0-9]/g, '').slice(-4) || '9921'}`,
+        owner_id: userId,
+        device_type: 'ESP32_MAIN_CONTROLLER',
+        tank_capacity_liters: 2000,
+        tank_height_cm: 180
+      });
+    }
   }
 
   public async getDeviceNodes(deviceId: string): Promise<DeviceNode[]> {

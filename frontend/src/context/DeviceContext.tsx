@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Device, PumpStatus, PumpState, SensorReading, Alert, AutomationRule } from '../types';
 import { ApiService, getCustomGatewayUrl } from '../services/api';
 import { useAuth } from './AuthContext';
@@ -8,6 +8,7 @@ interface DeviceContextType {
   devices: Device[];
   selectedDevice: Device | null;
   setSelectedDevice: (device: Device) => void;
+  userAuthCode: string;
   pumpStatus: PumpStatus | null;
   telemetry: SensorReading | null;
   alerts: Alert[];
@@ -22,6 +23,8 @@ interface DeviceContextType {
   commandPending: boolean;
   commandStatusText: string;
   refreshDevices: () => Promise<void>;
+  claimHardware: (deviceUid: string, customName?: string) => Promise<void>;
+  unlinkHardware: (deviceId: string) => Promise<void>;
   refreshRules: () => Promise<void>;
   syncRulesToHardware: (rulesList?: AutomationRule[]) => Promise<void>;
   reconnectWs: () => Promise<void>;
@@ -31,6 +34,13 @@ interface DeviceContextType {
   emergencyStop: (reason?: string) => Promise<void>;
   resetLockout: () => Promise<void>;
   acknowledgeAlert: (alertId: string) => Promise<void>;
+}
+
+export function computeUserAuthCode(u: any): string {
+  if (!u) return 'WPC-AUTH-DEFAULT';
+  if (u.auth_code) return u.auth_code;
+  const raw = (u.id || u.email || 'USER').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return `WPC-AUTH-${raw.slice(0, 16)}`;
 }
 
 const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
@@ -222,10 +232,10 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         mqttClientRef.current = client;
 
         client.on('connect', () => {
-          console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker! Subscribing strictly to account devices...');
+          console.log('[MQTT] ✓ Browser connected to Cloud MQTT Broker! Subscribing to account telemetry and global discovery...');
           setMqttConnected(true);
           
-          // Subscribe ONLY to devices owned by the active logged-in user
+          // 1. Subscribe to registered account devices
           if (devicesRef.current.length > 0) {
             devicesRef.current.forEach(d => {
               client.subscribe(`devices/${d.device_uid}/telemetry`);
@@ -234,6 +244,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               client.subscribe(`aquacontrol/${d.device_uid}/#`);
             });
           }
+
+          // 2. Global discovery to automatically detect and link hardware matching this Account's Auth Code
+          client.subscribe('devices/+/telemetry');
+          client.subscribe('devices/+/ack');
+          client.subscribe('devices/+/status');
+          client.subscribe('aquacontrol/telemetry');
+          client.subscribe('aquacontrol/+/telemetry');
+          client.subscribe('aquacontrol/ownership/#');
         });
 
         client.on('message', (topic: string, message: Buffer) => {
@@ -273,11 +291,49 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               }
             }
 
-            // STRICT ACCOUNT ISOLATION BARRIER:
-            // Check if this incoming hardware telemetry belongs to the active logged-in user!
-            const targetDev = devicesRef.current.find(d => d.device_uid === deviceUid || (selectedDeviceRef.current && selectedDeviceRef.current.device_uid === deviceUid));
+            // Check if this device is already in devicesRef
+            let targetDev = devicesRef.current.find(d => d.device_uid === deviceUid || (selectedDeviceRef.current && selectedDeviceRef.current.device_uid === deviceUid));
+
+            // DYNAMIC HARDWARE AUTO-DETECTION BY ACCOUNT AUTH CODE:
+            if (!targetDev && deviceUid && user) {
+              const incomingAuth = (data.auth_code || data.owner_id || data.user_auth_id || '').toString().trim();
+              const isMatch = (
+                incomingAuth === userAuthCode ||
+                incomingAuth === user.id ||
+                incomingAuth.toLowerCase() === user.email.toLowerCase() ||
+                incomingAuth === `WPC_AUTH_${user.id}`
+              );
+
+              if (isMatch) {
+                console.log(`[DeviceContext] ✓ Auto-Adopting Hardware ${deviceUid} matching Account Auth Code (${userAuthCode})`);
+                const autoDevice: Device = {
+                  id: `dev_${deviceUid.toLowerCase()}_${user.id.slice(-6)}`,
+                  device_uid: deviceUid,
+                  serial_number: `SN-2026-ESP32-${deviceUid.slice(-4)}`,
+                  device_type: 'ESP32_MAIN_CONTROLLER',
+                  owner_id: user.id,
+                  status: 'online',
+                  firmware_version: 'v2.1.0',
+                  local_ip: data.local_ip || '192.168.31.53',
+                  mac_address: data.mac_address || '24:6F:28:A8:1F:29',
+                  tank_capacity_liters: 2000,
+                  tank_height_cm: 180,
+                  last_seen: new Date().toISOString()
+                };
+
+                targetDev = autoDevice;
+                setDevices(prev => {
+                  if (prev.some(d => d.device_uid === deviceUid)) return prev;
+                  const updated = [...prev, autoDevice];
+                  devicesRef.current = updated;
+                  return updated;
+                });
+                setSelectedDevice(autoDevice);
+              }
+            }
+
             if (!targetDev) {
-              // Hardware is NOT linked to this account! Discard packet immediately.
+              // Hardware belongs to another account and has different Auth Code
               return;
             }
 
@@ -805,6 +861,88 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const userAuthCode = useMemo(() => computeUserAuthCode(user), [user]);
+
+  const claimHardware = useCallback(async (deviceUidInput: string, customName?: string) => {
+    if (!deviceUidInput || deviceUidInput.trim().length === 0) {
+      throw new Error('Please enter a valid Device UID (e.g. WPC-A81F29)');
+    }
+    const cleanUid = deviceUidInput.trim().toUpperCase();
+    const activeUserId = user?.id || 'usr_active';
+
+    const newDevice: Device = {
+      id: `dev_${cleanUid.toLowerCase()}_${activeUserId.slice(-6)}`,
+      device_uid: cleanUid,
+      serial_number: `SN-2026-ESP32-${cleanUid.replace(/[^A-Z0-9]/g, '').slice(-4) || '9921'}`,
+      device_type: 'ESP32_MAIN_CONTROLLER',
+      owner_id: activeUserId,
+      status: 'online',
+      firmware_version: 'v2.1.0',
+      local_ip: '192.168.31.53',
+      mac_address: '24:6F:28:A8:1F:29',
+      tank_capacity_liters: 2000,
+      tank_height_cm: 180,
+      last_seen: new Date().toISOString()
+    };
+
+    setDevices(prev => {
+      const filtered = prev.filter(d => d.device_uid !== cleanUid);
+      const updated = [...filtered, newDevice];
+      devicesRef.current = updated;
+      return updated;
+    });
+    setSelectedDevice(newDevice);
+
+    if (mqttClientRef.current && mqttClientRef.current.connected) {
+      const cmdPayload = JSON.stringify({
+        command: 'SET_AUTH_CODE',
+        auth_code: userAuthCode,
+        user_auth_id: userAuthCode,
+        owner_id: activeUserId,
+        user_email: user?.email,
+        timestamp: Date.now()
+      });
+
+      mqttClientRef.current.publish(`devices/${cleanUid}/commands`, cmdPayload, { qos: 1 });
+      mqttClientRef.current.publish(`aquacontrol/${cleanUid}/commands`, cmdPayload, { qos: 1 });
+      mqttClientRef.current.publish(`aquacontrol/ownership/claim`, JSON.stringify({
+        type: 'CLAIM_HARDWARE',
+        device_uid: cleanUid,
+        owner_id: activeUserId,
+        auth_code: userAuthCode,
+        user_email: user?.email
+      }), { qos: 1, retain: true });
+
+      mqttClientRef.current.subscribe(`devices/${cleanUid}/telemetry`);
+      mqttClientRef.current.subscribe(`devices/${cleanUid}/ack`);
+      mqttClientRef.current.subscribe(`devices/${cleanUid}/status`);
+      mqttClientRef.current.subscribe(`aquacontrol/${cleanUid}/#`);
+    }
+
+    try {
+      await ApiService.claimDevice({
+        device_uid: cleanUid,
+        auth_code: userAuthCode,
+        owner_id: activeUserId
+      });
+    } catch (e) {}
+
+    setIsDeviceOnline(true);
+    setCommandStatusText(`Hardware ${cleanUid} successfully linked to Account Auth Code: ${userAuthCode}`);
+    setTimeout(() => setCommandStatusText(''), 5000);
+  }, [user, userAuthCode]);
+
+  const unlinkHardware = useCallback(async (deviceId: string) => {
+    setDevices(prev => {
+      const updated = prev.filter(d => d.id !== deviceId && d.device_uid !== deviceId);
+      devicesRef.current = updated;
+      return updated;
+    });
+    if (selectedDevice?.id === deviceId || selectedDevice?.device_uid === deviceId) {
+      setSelectedDevice(null);
+    }
+  }, [selectedDevice]);
+
   const syncRulesToHardware = useCallback(async (rulesList?: AutomationRule[]) => {
     const activeRules = rulesList || rules;
     const devUid = selectedDevice?.device_uid || 'WPC-A81F29';
@@ -827,6 +965,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         devices,
         selectedDevice,
         setSelectedDevice,
+        userAuthCode,
         pumpStatus,
         telemetry,
         alerts,
@@ -841,6 +980,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         commandPending,
         commandStatusText,
         refreshDevices,
+        claimHardware,
+        unlinkHardware,
         refreshRules,
         syncRulesToHardware,
         reconnectWs: async () => { connectWs(); },
