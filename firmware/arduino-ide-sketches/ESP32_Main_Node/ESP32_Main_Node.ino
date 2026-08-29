@@ -56,8 +56,25 @@
 // =====================================================================
 // HARDWARE DEFINITIONS & CONSTANTS
 // =====================================================================
-#define DEVICE_UID             "WPC-A81F29"
 #define FIRMWARE_VERSION       "v2.2.0"
+
+// Dynamic Silicon-Generated Device UID (Derived from ESP32 eFuse MAC Address)
+String dynamicDeviceUid = "WPC-A81F29";
+
+void initHardwareDeviceUid() {
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "WPC-%02X%02X%02X", mac[3], mac[4], mac[5]);
+    dynamicDeviceUid = String(buf);
+    Serial.printf("\n========================================================\n");
+    Serial.printf("[HARDWARE SILICON] Generated Dynamic Device UID: %s\n", dynamicDeviceUid.c_str());
+    Serial.printf("[HARDWARE SILICON] Silicon MAC Address: %02X:%02X:%02X:%02X:%02X:%02X\n",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    Serial.printf("========================================================\n\n");
+}
+
+#define DEVICE_UID             dynamicDeviceUid.c_str()
 
 #define PIN_RELAY              23
 #define PIN_CURRENT_ADC        34
@@ -82,7 +99,7 @@
 // Provisioning Defaults
 #define PROVISION_AP_SSID      "AquaControl-Setup"
 #define PROVISION_AP_PASS      "setup1234"
-#define PROVISION_BLE_NAME     "WPC-A81F29"
+#define PROVISION_BLE_NAME     dynamicDeviceUid.c_str()
 
 // Universal Default Settings (Connects globally without local port forwarding)
 #define DEFAULT_WIFI_SSID      ""                // Optional: Hardcode your Wi-Fi Name here if desired
@@ -1475,22 +1492,26 @@ void setup() {
     mqttClient.setBufferSize(1024);
     mqttClient.setKeepAlive(15);
 
-    // 1. Load Saved Credentials from NVS Flash
+    // 1. Initialize Dynamic Hardware UID from Silicon eFuse MAC
+    WiFi.mode(WIFI_AP_STA);
+    initHardwareDeviceUid();
+
+    // 2. Load Saved Credentials from NVS Flash
     loadSavedCredentials();
 
-    // 2. Start Standard ESP32 BLE GATT Server
+    // 3. Start Standard ESP32 BLE GATT Server
     startBleProvisioning();
 
-    // 3. Start Wi-Fi in simultaneous AP + Station mode
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP(PROVISION_AP_SSID, PROVISION_AP_PASS);
+    // 4. Start Wi-Fi Hotspot with unique hardware-derived SSID
+    String dynamicApSsid = "AquaControl-" + dynamicDeviceUid.substring(4);
+    WiFi.softAP(dynamicApSsid.c_str(), PROVISION_AP_PASS);
     Serial.printf("[WiFi AP] SoftAP Hotspot Active: '%s' (Pass: '%s') -> IP: %s\n",
-        PROVISION_AP_SSID, PROVISION_AP_PASS, WiFi.softAPIP().toString().c_str());
+        dynamicApSsid.c_str(), PROVISION_AP_PASS, WiFi.softAPIP().toString().c_str());
 
-    // 4. Start Captive Portal DNS Server (Redirects all DNS queries to 192.168.4.1)
+    // 5. Start Captive Portal DNS Server (Redirects all DNS queries to 192.168.4.1)
     dnsServer.start(53, "*", WiFi.softAPIP());
 
-    // 5. Setup Local REST Server & Captive Portal Web Page
+    // 6. Setup Local REST Server & Captive Portal Web Page
     setupHttpEndpoints();
 
     // 6. Connect to saved Wi-Fi if available

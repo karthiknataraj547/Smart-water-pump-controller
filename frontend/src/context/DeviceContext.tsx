@@ -125,6 +125,15 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const wsRef = useRef<WebSocket | null>(null);
   const mqttClientRef = useRef<MqttClient | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const unlinkedDevicesRef = useRef<Set<string>>(new Set((() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const stored = localStorage.getItem('pump_unlinked_devices');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  })()));
 
   // 1-second interval heartbeat check (no UI freezing, stable online detection)
   useEffect(() => {
@@ -322,6 +331,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // =========================================================================
             // STRICT PER-ACCOUNT HARDWARE BARRIER & AUTH CODE ISOLATION
             // =========================================================================
+            // If device was explicitly deleted/unlinked by this account, strictly ignore its telemetry
+            if (unlinkedDevicesRef.current.has(deviceUid)) {
+              return;
+            }
+
             const activeUser = userRef.current;
             const activeAuthCode = userAuthCodeRef.current || (activeUser ? computeUserAuthCode(activeUser) : 'WPC-AUTH-DEFAULT');
 
@@ -928,6 +942,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const cleanUid = deviceUidInput.trim().toUpperCase();
     const activeUserId = user?.id || 'usr_active';
 
+    // Clear from tombstone list so user can link/re-link it
+    unlinkedDevicesRef.current.delete(cleanUid);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('pump_unlinked_devices', JSON.stringify(Array.from(unlinkedDevicesRef.current)));
+      } catch (e) {}
+    }
+
     const newDevice: Device = {
       id: `dev_${cleanUid.toLowerCase()}_${activeUserId.slice(-6)}`,
       device_uid: cleanUid,
@@ -992,9 +1014,17 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const unlinkHardware = useCallback(async (deviceId: string) => {
     const target = devicesRef.current.find(d => d.id === deviceId || d.device_uid === deviceId) || selectedDevice;
-    const uid = target?.device_uid || deviceId;
+    const uid = (target?.device_uid || deviceId).trim().toUpperCase();
 
-    // 1. Dispatch cryptographic release command to ESP32 Hardware
+    // 1. Mark as tombstone so MQTT background never auto-re-adopts it
+    unlinkedDevicesRef.current.add(uid);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('pump_unlinked_devices', JSON.stringify(Array.from(unlinkedDevicesRef.current)));
+      } catch (e) {}
+    }
+
+    // 2. Dispatch cryptographic release command to ESP32 Hardware
     if (mqttClientRef.current && mqttClientRef.current.connected && uid) {
       const resetPayload = JSON.stringify({
         command: 'RELEASE_AUTH',
@@ -1014,16 +1044,15 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }), { qos: 1 });
     }
 
-    // 2. Call backend API to delete the device link from this account
+    // 3. Call backend API to delete the device link from this account
     try {
-      if (target?.id) {
-        await ApiService.deleteDevice(target.id);
-      }
+      const devIdToDelete = target?.id || deviceId;
+      await ApiService.deleteDevice(devIdToDelete);
     } catch (err) {
       console.warn('[DeviceContext] Backend deleteDevice note:', err);
     }
 
-    // 3. Clear local device state
+    // 4. Clear local device state
     setDevices(prev => {
       const updated = prev.filter(d => d.id !== deviceId && d.device_uid !== deviceId && d.device_uid !== uid);
       devicesRef.current = updated;

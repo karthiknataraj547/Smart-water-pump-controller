@@ -20,7 +20,10 @@ export class DeviceService {
   }
 
   public async deleteDevice(deviceId: string, userId: string): Promise<boolean> {
-    const dev = await db.queryOne<Device>('SELECT * FROM devices WHERE (id = ? OR device_uid = ?) AND owner_id = ?', [deviceId, deviceId, userId]);
+    const dev = await db.queryOne<Device>(
+      'SELECT * FROM devices WHERE (id = ? OR device_uid = ?)',
+      [deviceId, deviceId]
+    );
     if (!dev) return false;
 
     await db.execute('DELETE FROM pump_status WHERE device_id = ?', [dev.id]);
