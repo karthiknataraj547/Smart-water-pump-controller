@@ -43,6 +43,27 @@ export function computeUserAuthCode(u: any): string {
   return `WPC-AUTH-${raw.slice(0, 16)}`;
 }
 
+export function parseSafeJson(str: string): any {
+  if (!str || typeof str !== 'string') return null;
+  const trimmed = str.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch (e) {
+    // Auto-repair truncated JSON string (e.g. from older firmware versions)
+    try {
+      let repair = trimmed;
+      const lastComma = repair.lastIndexOf(',');
+      if (lastComma > 0) {
+        repair = repair.substring(0, lastComma) + '}';
+        return JSON.parse(repair);
+      }
+    } catch (e2) {}
+  }
+  return null;
+}
+
 const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
 
 function getWsUrl(token: string | null): string | null {
@@ -258,7 +279,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           try {
             const payloadStr = message.toString();
             if (!payloadStr || payloadStr.trim().length === 0) return;
-            const data = JSON.parse(payloadStr);
+            const data = parseSafeJson(payloadStr);
+            if (!data) return;
 
             let deviceUid = data.device_uid || data.deviceUid;
             let subTopic = '';
@@ -486,7 +508,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               }
             }
           } catch (err) {
-            console.warn('[MQTT Client] Error processing message payload:', err);
+            // Silently ignore non-JSON or invalid broker packets
           }
         });
       } catch (err) {
