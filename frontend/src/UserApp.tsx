@@ -8,6 +8,7 @@ import { AutomationPanel } from './components/Automation/AutomationPanel';
 import { AlertsView } from './components/Alerts/AlertsView';
 import { AnalyticsView } from './components/Analytics/AnalyticsView';
 import { ProvisioningWizard } from './components/Provisioning/ProvisioningWizard';
+import { DevicesView } from './components/Devices/DevicesView';
 import { ProjectorView } from './components/ProjectorMode/ProjectorView';
 import { AuthModal } from './components/Auth/AuthModal';
 import { useDevice } from './context/DeviceContext';
@@ -184,7 +185,7 @@ export const UserApp: React.FC = () => {
                 <div className="pt-2 border-t border-slate-700/20">
                   <button
                     type="button"
-                    onClick={() => setActiveTab('provisioning')}
+                    onClick={() => setActiveTab('devices')}
                     className="neu-btn px-6 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider cursor-pointer text-slate-300 hover:text-white"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
@@ -341,8 +342,8 @@ export const UserApp: React.FC = () => {
           {/* TAB 6: ALARM FEED */}
           {activeTab === 'alerts' && <AlertsView />}
 
-          {/* TAB 7: DEVICE PROVISIONING */}
-          {activeTab === 'provisioning' && <ProvisioningWizard />}
+          {/* TAB 7: HARDWARE CONTROLLER NODES REGISTRY */}
+          {(activeTab === 'devices' || activeTab === 'provisioning') && <DevicesView />}
 
           {/* TAB 8: CONTROL ROOM PROJECTOR VIEW */}
           {activeTab === 'projector' && <ProjectorView />}

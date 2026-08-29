@@ -239,11 +239,14 @@ void loop() {
 
         if (distanceCm > 0.0) {
             float effectiveDepth = TANK_HEIGHT_CM - TANK_SENSOR_OFFSET;
+            if (effectiveDepth <= 0.0f) effectiveDepth = TANK_HEIGHT_CM;
+            
             float currentWaterDepth = TANK_HEIGHT_CM - distanceCm;
-            levelPercentage = (currentWaterDepth / effectiveDepth) * 100.0;
-            if (levelPercentage > 100.0) levelPercentage = 100.0;
-            if (levelPercentage < 0.0) levelPercentage = 0.0;
-            waterLiters = (levelPercentage / 100.0) * TANK_CAPACITY_LITERS;
+            levelPercentage = (currentWaterDepth / effectiveDepth) * 100.0f;
+            if (distanceCm <= TANK_SENSOR_OFFSET) levelPercentage = 100.0f;
+            if (distanceCm >= TANK_HEIGHT_CM) levelPercentage = 0.0f;
+            levelPercentage = constrain(levelPercentage, 0.0f, 100.0f);
+            waterLiters = (levelPercentage / 100.0f) * TANK_CAPACITY_LITERS;
             sensorHealth |= 0x01; // Ultrasonic Health OK
         } else {
             // Strict Fault: Ultrasonic probe disconnected or no echo

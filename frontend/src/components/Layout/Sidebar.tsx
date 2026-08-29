@@ -6,6 +6,7 @@ import {
   BarChart3,
   Sliders,
   BellRing,
+  Cpu,
   Bluetooth,
   Monitor,
   Settings,
@@ -43,12 +44,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const navItems = [
     { id: 'dashboard', label: 'Overview Dashboard', icon: LayoutDashboard },
+    { id: 'devices', label: 'Hardware Devices', icon: Cpu },
     { id: 'pump_control', label: 'Pump Controller', icon: Power },
     { id: 'tank_monitor', label: 'Water Tank View', icon: Waves },
     { id: 'analytics', label: 'Telemetry Analytics', icon: BarChart3 },
     { id: 'automation', label: 'Autonomous Rules', icon: Sliders },
     { id: 'alerts', label: 'Alarm Feed', icon: BellRing, badge: unackAlertsCount },
-    { id: 'provisioning', label: 'Device Provisioning', icon: Bluetooth },
     { id: 'projector', label: 'Control Room View', icon: Monitor, highlight: true },
     { id: 'settings', label: 'System Settings', icon: Settings },
   ];

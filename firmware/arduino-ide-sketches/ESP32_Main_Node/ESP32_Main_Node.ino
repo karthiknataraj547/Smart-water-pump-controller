@@ -1354,7 +1354,7 @@ void TaskNetworkLoop(void *parameter) {
                     float totalFlowOut = subNodeConnected ? latestTankData.total_inflow_l : 0.0f;
                     float tdsOut = subNodeConnected ? latestTankData.tds_ppm : 0.0f;
 
-                    StaticJsonDocument<512> doc;
+                    StaticJsonDocument<1024> doc;
                     doc["device_uid"] = DEVICE_UID;
                     doc["timestamp"] = millis() / 1000;
                     doc["water_level_percentage"] = levelOut;
@@ -1381,7 +1381,7 @@ void TaskNetworkLoop(void *parameter) {
                     doc["auth_code"] = authCode;
                     doc["owner_id"] = authCode;
 
-                    char buffer[512];
+                    char buffer[1024];
                     serializeJson(doc, buffer);
                     String topic1 = String("devices/") + DEVICE_UID + "/telemetry";
                     String topic2 = String("aquacontrol/") + DEVICE_UID + "/telemetry";
