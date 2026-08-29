@@ -472,14 +472,7 @@ export class ApiService {
         }
       }
 
-      const isKarthik = currentUserEmail === 'karthiknataraj547@gmail.com' || currentUserId === 'usr_karthik_admin_001';
-      const userDevices = store.devices.filter((d: any) => {
-        if (isKarthik) {
-          return d.owner_id === 'usr_karthik_admin_001' || d.owner_id === 'usr_admin_001' || !d.owner_id;
-        }
-        return d.owner_id === currentUserId;
-      });
-
+      const userDevices = store.devices.filter((d: any) => d.owner_id === currentUserId);
       return Promise.resolve(userDevices as any);
     }
 
@@ -508,6 +501,14 @@ export class ApiService {
       }
       saveLocalStore(store);
       return Promise.resolve(existingDev as any);
+    }
+
+    if (endpoint.startsWith('/devices/') && method === 'DELETE') {
+      const parts = endpoint.split('/');
+      const devIdOrUid = parts[parts.length - 1];
+      store.devices = store.devices.filter(d => d.id !== devIdOrUid && d.device_uid !== devIdOrUid);
+      saveLocalStore(store);
+      return Promise.resolve({ success: true, message: 'Device deleted from account' } as any);
     }
 
     if (endpoint.startsWith('/devices/') && method === 'GET') {
@@ -916,6 +917,12 @@ export class ApiService {
     return this.request('/devices/claim', {
       method: 'POST',
       body: JSON.stringify(payload)
+    });
+  }
+
+  static async deleteDevice(deviceId: string): Promise<any> {
+    return this.request(`/devices/${deviceId}`, {
+      method: 'DELETE'
     });
   }
 

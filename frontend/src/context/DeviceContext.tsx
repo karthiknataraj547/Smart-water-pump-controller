@@ -994,27 +994,52 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const target = devicesRef.current.find(d => d.id === deviceId || d.device_uid === deviceId) || selectedDevice;
     const uid = target?.device_uid || deviceId;
 
+    // 1. Dispatch cryptographic release command to ESP32 Hardware
     if (mqttClientRef.current && mqttClientRef.current.connected && uid) {
       const resetPayload = JSON.stringify({
-        command: 'RESET_AUTH',
-        action: 'RESET_AUTH',
+        command: 'RELEASE_AUTH',
+        action: 'RELEASE_AUTH',
         auth_code: userAuthCode,
+        device_uid: uid,
         timestamp: Date.now()
       });
       mqttClientRef.current.publish(`devices/${uid}/commands`, resetPayload, { qos: 1 });
       mqttClientRef.current.publish(`aquacontrol/${uid}/commands`, resetPayload, { qos: 1 });
+      mqttClientRef.current.publish('aquacontrol/ownership/release', JSON.stringify({
+        event: 'HARDWARE_RELEASED',
+        device_uid: uid,
+        previous_owner_id: user?.id,
+        previous_auth_code: userAuthCode,
+        timestamp: Date.now()
+      }), { qos: 1 });
     }
 
+    // 2. Call backend API to delete the device link from this account
+    try {
+      if (target?.id) {
+        await ApiService.deleteDevice(target.id);
+      }
+    } catch (err) {
+      console.warn('[DeviceContext] Backend deleteDevice note:', err);
+    }
+
+    // 3. Clear local device state
     setDevices(prev => {
-      const updated = prev.filter(d => d.id !== deviceId && d.device_uid !== deviceId);
+      const updated = prev.filter(d => d.id !== deviceId && d.device_uid !== deviceId && d.device_uid !== uid);
       devicesRef.current = updated;
       return updated;
     });
-    if (selectedDevice?.id === deviceId || selectedDevice?.device_uid === deviceId) {
+
+    if (selectedDevice?.id === deviceId || selectedDevice?.device_uid === deviceId || selectedDevice?.device_uid === uid) {
       setSelectedDevice(null);
       setIsDeviceOnline(false);
+      setPumpStatus(null);
+      setTelemetry(null);
     }
-  }, [selectedDevice, userAuthCode]);
+
+    setCommandStatusText(`Hardware ${uid} successfully released and unlinked from your account.`);
+    setTimeout(() => setCommandStatusText(''), 5000);
+  }, [selectedDevice, userAuthCode, user]);
 
   const syncRulesToHardware = useCallback(async (rulesList?: AutomationRule[]) => {
     const activeRules = rulesList || rules;

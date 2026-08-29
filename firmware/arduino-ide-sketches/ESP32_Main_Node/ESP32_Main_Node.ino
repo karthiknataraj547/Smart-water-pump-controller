@@ -1258,7 +1258,14 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         systemFault = false;
         digitalWrite(PIN_LED_FAULT, LOW);
         publishHardwareAck("OFF", "FAULT_CLEARED", cmdId.c_str());
-    } else if (action.equalsIgnoreCase("FACTORY_RESET") || action.equalsIgnoreCase("RESET_AUTH") || action.equalsIgnoreCase("UNLINK_HARDWARE")) {
+    } else if (action.equalsIgnoreCase("RELEASE_AUTH") || action.equalsIgnoreCase("UNLINK_ACCOUNT") || action.equalsIgnoreCase("RELEASE_OWNERSHIP")) {
+        preferences.begin("pump_cfg", false);
+        preferences.putString("auth_code", "UNPROVISIONED");
+        preferences.end();
+        authCode = "UNPROVISIONED";
+        Serial.println("[MQTT] ✓ Hardware Ownership Released! Auth Code reset to UNPROVISIONED. Ready for new account link.");
+        publishHardwareAck(pumpState ? "ON" : "OFF", "AUTH_RELEASED", cmdId.c_str());
+    } else if (action.equalsIgnoreCase("FACTORY_RESET") || action.equalsIgnoreCase("RESET_AUTH") || action.equalsIgnoreCase("UNLINK_HARDWARE") || action.equalsIgnoreCase("DELETE_DEVICE")) {
         preferences.begin("pump_cfg", false);
         preferences.clear();
         preferences.end();

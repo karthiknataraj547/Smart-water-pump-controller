@@ -48,3 +48,19 @@ export async function claimDevice(req: AuthenticatedRequest, res: Response): Pro
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
   }
 }
+
+export async function deleteDevice(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const deviceId = req.params.id;
+    const userId = req.user!.id;
+    const deleted = await deviceService.deleteDevice(deviceId, userId);
+    if (!deleted) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Device not found or not owned by this account' } });
+      return;
+    }
+    res.json({ success: true, message: 'Device successfully released and unlinked from this account' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: err.message } });
+  }
+}
+

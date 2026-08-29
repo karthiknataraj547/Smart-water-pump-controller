@@ -15,11 +15,20 @@ export class DeviceService {
   }
 
   public async getDevices(userId: string, role: UserRole): Promise<Device[]> {
-    // Strict Device Ownership Isolation: Each user account ONLY sees the hardware they added/configured
-    if (userId === 'usr_karthik_admin_001') {
-      return db.query<Device>('SELECT * FROM devices WHERE owner_id = ? OR owner_id = "usr_admin_001" OR owner_id IS NULL ORDER BY created_at DESC', [userId]);
-    }
+    // Strict Per-User Device Ownership Barrier:
     return db.query<Device>('SELECT * FROM devices WHERE owner_id = ? ORDER BY created_at DESC', [userId]);
+  }
+
+  public async deleteDevice(deviceId: string, userId: string): Promise<boolean> {
+    const dev = await db.queryOne<Device>('SELECT * FROM devices WHERE (id = ? OR device_uid = ?) AND owner_id = ?', [deviceId, deviceId, userId]);
+    if (!dev) return false;
+
+    await db.execute('DELETE FROM pump_status WHERE device_id = ?', [dev.id]);
+    await db.execute('DELETE FROM device_nodes WHERE main_device_id = ?', [dev.id]);
+    await db.execute('DELETE FROM alerts WHERE device_id = ?', [dev.id]);
+    await db.execute('DELETE FROM automation_rules WHERE device_id = ?', [dev.id]);
+    await db.execute('DELETE FROM devices WHERE id = ?', [dev.id]);
+    return true;
   }
 
   public async getDeviceById(deviceId: string): Promise<Device | null> {
