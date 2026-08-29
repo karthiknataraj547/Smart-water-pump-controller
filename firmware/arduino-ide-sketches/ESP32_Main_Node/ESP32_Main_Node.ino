@@ -921,9 +921,11 @@ void triggerEmergencyStop(const char* reason, const char* cmdId) {
 void publishHardwareAck(const char* state, const char* initiator, const char* cmdId) {
     if (!mqttClient.connected()) return;
     StaticJsonDocument<384> doc;
-    doc["device_uid"] = DEVICE_UID;
-    if (cmdId && strlen(cmdId) > 0) doc["cmd_id"] = cmdId;
-    doc["command_id"] = cmdId;
+    doc["device_uid"] = dynamicDeviceUid;
+    if (cmdId && strlen(cmdId) > 0) {
+        doc["cmd_id"] = cmdId;
+        doc["command_id"] = cmdId;
+    }
     doc["status"] = systemFault ? "FAILED" : "SUCCESS";
     doc["confirmed_state"] = state;
     doc["pump_state"] = pumpState ? "ON" : "OFF";
@@ -934,13 +936,9 @@ void publishHardwareAck(const char* state, const char* initiator, const char* cm
 
     char buffer[384];
     serializeJson(doc, buffer);
-    String topic1 = String("devices/") + DEVICE_UID + "/ack";
-    String topic2 = String("aquacontrol/") + DEVICE_UID + "/ack";
-    String topic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/ack";
-    mqttClient.publish(topic1.c_str(), buffer, false); // Do NOT retain ACKs
-    mqttClient.publish(topic2.c_str(), buffer, false); // Do NOT retain ACKs
-    mqttClient.publish(topic3.c_str(), buffer, false); // Do NOT retain ACKs
-    Serial.printf("[MQTT ACK] Published confirmation: %s\n", buffer);
+    String topic = String("devices/") + dynamicDeviceUid + "/ack";
+    mqttClient.publish(topic.c_str(), buffer, false);
+    Serial.printf("[MQTT ACK 100ms] Published confirmation to '%s': %s\n", topic.c_str(), buffer);
 }
 
 void sendHttpStateAck(const char* state, const char* initiator, const char* cmdId) {
@@ -1408,14 +1406,15 @@ void TaskNetworkLoop(void *parameter) {
                     float totalFlowOut = subNodeConnected ? latestTankData.total_inflow_l : 0.0f;
                     float tdsOut = subNodeConnected ? latestTankData.tds_ppm : 0.0f;
 
-                    StaticJsonDocument<1024> doc;
-                    doc["device_uid"] = DEVICE_UID;
+                    StaticJsonDocument<768> doc;
+                    doc["device_uid"] = dynamicDeviceUid;
                     doc["timestamp"] = millis() / 1000;
                     doc["water_level_percentage"] = levelOut;
                     doc["water_level_pct"] = levelOut;
                     doc["water_level_liters"] = litersOut;
                     doc["flow_rate_lpm"] = flowOut;
                     doc["inflow_rate_lpm"] = flowOut;
+                    doc["total_liters"] = totalFlowOut;
                     doc["total_inflow_liters"] = totalFlowOut;
                     doc["tds_ppm"] = tdsOut;
                     doc["temperature_c"] = latestTankData.temperature_c;
@@ -1426,25 +1425,14 @@ void TaskNetworkLoop(void *parameter) {
                     doc["runtime_seconds"] = totalRuntimeSeconds;
                     doc["subnode_online"] = subNodeConnected;
                     doc["ultrasonic_online"] = isLevelGood;
-                    doc["water_level_fault"] = subNodeConnected && (waterLevelSensorFault || latestTankData.water_level_pct < 0.0f);
                     doc["sensor_status"] = !subNodeConnected ? "SUBNODE_DISCONNECTED" : (waterLevelSensorFault ? "ULTRASONIC_FAULT" : "HEALTHY");
-                    doc["active_rules_count"] = dynamicRuleCount;
                     doc["rssi"] = WiFi.RSSI();
-                    doc["free_heap"] = ESP.getFreeHeap();
                     doc["uptime_seconds"] = millis() / 1000;
-                    doc["auth_code"] = authCode;
-                    doc["owner_id"] = authCode;
 
-                    char buffer[1024];
+                    char buffer[768];
                     serializeJson(doc, buffer);
-                    String topic1 = String("devices/") + DEVICE_UID + "/telemetry";
-                    String topic2 = String("aquacontrol/") + DEVICE_UID + "/telemetry";
-                    String topic3 = String("aquacontrol/v1/devices/") + DEVICE_UID + "/telemetry";
-                    String topic4 = String("aquacontrol/telemetry");
-                    bool p1 = mqttClient.publish(topic1.c_str(), buffer);
-                    bool p2 = mqttClient.publish(topic2.c_str(), buffer);
-                    bool p3 = mqttClient.publish(topic3.c_str(), buffer);
-                    bool p4 = mqttClient.publish(topic4.c_str(), buffer);
+                    String topic = String("devices/") + dynamicDeviceUid + "/telemetry";
+                    mqttClient.publish(topic.c_str(), buffer, false);
 
                     if (packetCounter % 20 == 0) {
                         Serial.printf("[MQTT 100ms] Tank: %5.1f%% (%4.0fL) | Flow: %4.1f LPM | Pump: %s | Status: %s\n",
