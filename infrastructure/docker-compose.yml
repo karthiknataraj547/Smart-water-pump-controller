@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartpump_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: smartpump_admin
+      POSTGRES_PASSWORD: smartpump_secure_password
+      POSTGRES_DB: smartpump_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartpump_admin -d smartpump_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: smartpump_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass smartpump_redis_secret
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "smartpump_redis_secret", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: smartpump_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"    # MQTT standard port (internal/testing)
+      - "8883:8883"    # MQTT over TLS
+      - "9001:9001"    # MQTT over WebSocket
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
+  mosquitto_data:
+  mosquitto_log:

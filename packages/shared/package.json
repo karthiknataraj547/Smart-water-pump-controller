@@ -1,0 +1,14 @@
+{
+  "name": "@smartpump/shared",
+  "version": "1.0.0",
+  "description": "Shared constants, enums, interfaces, and MQTT topic builders",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@smartpump/backend-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production Next.js API for Smart Water Pump Controller IoT Platform",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@smartpump/auth": "*",
+    "@smartpump/database": "*",
+    "@smartpump/mqtt": "*",
+    "@smartpump/shared": "*",
+    "@smartpump/validation": "*",
+    "ioredis": "^5.4.2",
+    "next": "15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.1",
+    "typescript": "^5.7.2"
+  }
+}

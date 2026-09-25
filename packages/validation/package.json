@@ -1,0 +1,17 @@
+{
+  "name": "@smartpump/validation",
+  "version": "1.0.0",
+  "description": "Zod validation schemas for API and MQTT payloads",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,320 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum HardwareStatus {
+  UNCLAIMED
+  ONLINE
+  OFFLINE
+  MAINTENANCE
+  EMERGENCY_LOCKED
+}
+
+enum PumpMode {
+  MANUAL
+  AUTO
+  DISABLED
+}
+
+enum PumpStateEnum {
+  OFF
+  STARTING
+  ON
+  STOPPING
+  FAULT
+  EMERGENCY_STOPPED
+}
+
+enum CommandStatus {
+  PENDING
+  DISPATCHED
+  ACKNOWLEDGED
+  FAILED
+  TIMED_OUT
+}
+
+model User {
+  id                      String                   @id @default(uuid())
+  email                   String                   @unique
+  passwordHash            String
+  fullName                String
+  phoneNumber             String?
+  role                    Role                     @default(USER)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  
+  sessions                Session[]
+  hardware                Hardware[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference?
+  automationRules         AutomationRule[]
+
+  @@index([email])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  tokenHash    String   @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Hardware {
+  id                  String             @id @default(uuid())
+  userId              String
+  serialNumber        String             @unique
+  name                String             @default("Main Pump Controller")
+  status              HardwareStatus     @default(OFFLINE)
+  firmwareVersion     String?
+  lastHeartbeat       DateTime?
+  wifiSsid            String?
+  wifiRssi            Int?
+  ipAddress           String?
+  macAddress          String             @unique
+  emergencyStopActive Boolean            @default(false)
+  emergencyStoppedAt  DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mainNode            MainNode?
+  subNodes            SubNode[]
+  credentials         DeviceCredential?
+  pumpState           PumpState?
+  pumpEvents          PumpEvent[]
+  sensorReadings      SensorReading[]
+  telemetryHourly     TelemetryHourly[]
+  commands            DeviceCommand[]
+  emergencyEvents     EmergencyStopEvent[]
+  automationRules     AutomationRule[]
+
+  @@unique([id, userId])
+  @@index([userId])
+  @@index([serialNumber])
+}
+
+model MainNode {
+  id              String    @id @default(uuid())
+  hardwareId      String    @unique
+  esp32ChipId     String    @unique
+  bootCount       Int       @default(0)
+  freeHeap        Int?
+  relayState      Boolean   @default(false)
+  uptimeSeconds   Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  hardware        Hardware  @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+}
+
+model SubNode {
+  id              String    @id @default(uuid())
+  hardwareId      String
+  nodeIdentifier  String    // e.g. "SUB_TANK_OVERHEAD"
+  macAddress      String
+  batteryPercent  Float?
+  signalRssi      Int?
+  isOnline        Boolean   @default(false)
+  lastSeen        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  hardware        Hardware  @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+
+  @@unique([hardwareId, nodeIdentifier])
+  @@index([hardwareId])
+}
+
+model DeviceCredential {
+  id              String    @id @default(uuid())
+  hardwareId      String    @unique
+  mqttUsername    String    @unique
+  mqttPasswordHash String
+  tlsCertificateFingerprint String?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  hardware        Hardware  @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+}
+
+model PumpState {
+  id                  String        @id @default(uuid())
+  hardwareId          String        @unique
+  mode                PumpMode      @default(MANUAL)
+  state               PumpStateEnum @default(OFF)
+  currentRunStartedAt DateTime?
+  totalRuntimeSeconds BigInt        @default(0)
+  currentFlowRateLpm  Float         @default(0.0)
+  totalVolumePumpedL  Float         @default(0.0)
+  headPressureMeters  Float         @default(0.0)
+  lastCommandId       String?
+  updatedAt           DateTime      @updatedAt
+
+  hardware            Hardware      @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+}
+
+model PumpEvent {
+  id              String        @id @default(uuid())
+  hardwareId      String
+  triggerSource   String        // "MANUAL_APP", "AUTO_RULE_LOW_WATER", "EMERGENCY_STOP"
+  previousState   PumpStateEnum
+  newState        PumpStateEnum
+  runtimeSeconds  Int?
+  volumePumpedL   Float?
+  flowRateAvgLpm  Float?
+  recordedAt      DateTime      @default(now())
+
+  hardware        Hardware      @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+
+  @@index([hardwareId, recordedAt])
+}
+
+model SensorReading {
+  id              String    @id @default(uuid())
+  hardwareId      String
+  tankLevelPct    Float     // 0.0 - 100.0%
+  waterVolumeL    Float     // Liters
+  flowRateLpm     Float     // Liters per minute
+  tdsPpm          Float     // PPM
+  tdhMeters       Float     // Total Dynamic Head in meters
+  batterySubNode  Float?
+  timestamp       DateTime  @default(now())
+
+  hardware        Hardware  @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+
+  @@index([hardwareId, timestamp])
+}
+
+model TelemetryHourly {
+  id              String    @id @default(uuid())
+  hardwareId      String
+  bucketStart     DateTime
+  avgTankLevel    Float
+  minTankLevel    Float
+  maxTankLevel    Float
+  totalWaterPumped Float
+  avgFlowRate     Float
+  avgTds          Float
+  totalPumpRuntimeSec Int
+  sampleCount     Int
+
+  hardware        Hardware  @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+
+  @@unique([hardwareId, bucketStart])
+  @@index([hardwareId, bucketStart])
+}
+
+model DeviceCommand {
+  id              String        @id @default(uuid())
+  hardwareId      String
+  command         String        // "PUMP_START", "PUMP_STOP", "EMERGENCY_STOP", "RESET_EMERGENCY"
+  parameters      Json?
+  status          CommandStatus @default(PENDING)
+  issuedByUserId  String
+  dispatchedAt    DateTime      @default(now())
+  acknowledgedAt  DateTime?
+  errorMessage    String?
+
+  hardware        Hardware      @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+
+  @@index([hardwareId, dispatchedAt])
+}
+
+model EmergencyStopEvent {
+  id              String    @id @default(uuid())
+  hardwareId      String
+  triggeredBy     String    // "APP_USER", "DRY_RUN_PROTECTION", "OVERPRESSURE", "SENSOR_FAULT"
+  tankLevelAtStop Float?
+  flowRateAtStop  Float?
+  clearedAt       DateTime?
+  clearedByUserId String?
+  createdAt       DateTime  @default(now())
+
+  hardware        Hardware  @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+
+  @@index([hardwareId, createdAt])
+}
+
+model AutomationRule {
+  id              String    @id @default(uuid())
+  userId          String
+  hardwareId      String
+  name            String
+  isEnabled       Boolean   @default(true)
+  conditionMetric String    // "TANK_LEVEL_PERCENT", "TDS_PPM", "SCHEDULE"
+  operator        String    // "LESS_THAN", "GREATER_THAN", "EQUALS"
+  thresholdValue  Float
+  secondaryMetric String?
+  secondaryOp     String?
+  secondaryVal    Float?
+  action          String    // "PUMP_START", "PUMP_STOP", "ALERT_ONLY"
+  actionDurationSec Int?
+  cooldownSeconds Int       @default(300)
+  lastTriggeredAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hardware        Hardware  @relation(fields: [hardwareId], references: [id], onDelete: Cascade)
+  logs            AutomationLog[]
+
+  @@index([hardwareId, isEnabled])
+}
+
+model AutomationLog {
+  id              String          @id @default(uuid())
+  ruleId          String
+  metricValue     Float
+  actionTaken     String
+  resultStatus    String          // "EXECUTED", "SUPPRESSED_COOLDOWN", "OVERRIDDEN_EMERGENCY"
+  timestamp       DateTime        @default(now())
+
+  rule            AutomationRule  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, timestamp])
+}
+
+model Notification {
+  id              String    @id @default(uuid())
+  userId          String
+  title           String
+  body            String
+  severity        String    // "INFO", "WARNING", "CRITICAL"
+  isRead          Boolean   @default(false)
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+model NotificationPreference {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  pumpAlerts          Boolean  @default(true)
+  tankLevelAlerts     Boolean  @default(true)
+  deviceOfflineAlerts Boolean  @default(true)
+  automationAlerts    Boolean  @default(true)
+  pushToken           String?
+  updatedAt           DateTime @updatedAt
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
