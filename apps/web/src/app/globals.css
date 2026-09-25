@@ -1446,3 +1446,325 @@ body {
   line-height: 1.6;
 }
 
+/* ==========================================================================
+   INTERACTIVE MOBILE APP SHOWCASE & ADAPTIVE RESPONSIVENESS
+   ========================================================================== */
+
+/* Mobile Navigation Hamburger & Drawer */
+.mobile-nav-toggle {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  color: var(--text-main);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-menu-drawer {
+  display: none;
+  background: #FFFFFF;
+  border-bottom: 2px solid var(--border-medium);
+  padding: 20px 24px;
+  box-shadow: var(--shadow-lg);
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeIn 0.2s ease;
+}
+
+.mobile-menu-drawer.open {
+  display: flex;
+}
+
+.mobile-menu-link {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  text-decoration: none;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Mobile App Showcase Section */
+.app-showcase-section {
+  padding: 80px 0;
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.app-showcase-grid {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 56px;
+  align-items: center;
+}
+
+@media (max-width: 960px) {
+  .app-showcase-grid {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+}
+
+/* Realistic Smartphone Device Frame Mockup */
+.phone-mockup-wrapper {
+  position: relative;
+  max-width: 360px;
+  width: 100%;
+}
+
+.phone-mockup-frame {
+  background: #0F172A;
+  border: 10px solid #1E293B;
+  border-radius: 46px;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.3), 0 0 0 2px #94A3B8;
+  overflow: hidden;
+  position: relative;
+}
+
+.phone-dynamic-island {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90px;
+  height: 20px;
+  background: #000000;
+  border-radius: 20px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camera-lens {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1E293B;
+  margin-left: 50px;
+}
+
+.phone-screen {
+  background: var(--bg-app);
+  height: 600px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.phone-status-bar {
+  height: 38px;
+  padding: 0 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-main);
+  padding-top: 6px;
+  background: #FFFFFF;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.phone-app-content {
+  flex: 1;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+/* Bottom Tab Bar Inside Phone */
+.phone-bottom-nav {
+  height: 56px;
+  background: #FFFFFF;
+  border-top: 1px solid var(--border-light);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: center;
+  padding: 0 4px;
+}
+
+.phone-nav-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  height: 100%;
+  transition: all 0.15s ease;
+}
+
+.phone-nav-tab.active {
+  color: var(--color-primary);
+}
+
+.phone-nav-tab.active svg {
+  color: var(--color-primary);
+}
+
+/* Feature Details & Download Card beside Phone */
+.app-details-column {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.app-features-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.app-feature-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.app-feature-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--bg-accent-soft);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border-accent);
+}
+
+.app-download-box {
+  background: #FFFFFF;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .app-download-box {
+    flex-direction: column;
+    text-align: center;
+  }
+}
+
+.qr-code-card {
+  width: 90px;
+  height: 90px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   RESPONSIVE & ADAPTIVE BREAKPOINTS
+   ========================================================================== */
+
+/* Tablets & Mobile Navigation */
+@media (max-width: 960px) {
+  .nav-links {
+    display: none;
+  }
+
+  .mobile-nav-toggle {
+    display: flex;
+  }
+
+  .console-body {
+    grid-template-columns: 1fr;
+  }
+
+  .console-stage {
+    border-right: none;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .hero-title {
+    font-size: 32px;
+  }
+
+  .hero-button-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-button-group a {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+/* Small Mobile Screen Adjustments (<640px) */
+@media (max-width: 640px) {
+  .spatial-flex {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .motor-visual-wrap {
+    width: 100%;
+    flex-direction: row;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  .telemetry-pill-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .products-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cart-drawer {
+    width: 100%;
+    max-width: 100vw;
+  }
+
+  .checkout-modal-card {
+    max-width: 100%;
+    margin: 10px;
+  }
+
+  .announcement-bar {
+    font-size: 11px;
+    padding: 6px 10px;
+    gap: 8px;
+    flex-direction: column;
+  }
+
+  .section-title {
+    font-size: 24px;
+  }
+}
+
+
