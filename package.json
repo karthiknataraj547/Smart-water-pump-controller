@@ -33,6 +33,11 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "effect": "^3.22.2"
+    "effect": "^3.22.2",
+    "next": "^15.5.26"
+  },
+  "overrides": {
+    "postcss": "^8.5.28",
+    "deepmerge-ts": "^8.0.0"
   }
 }
