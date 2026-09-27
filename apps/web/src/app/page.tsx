@@ -201,6 +201,23 @@ export default function HomePage() {
   // Mobile App Phone Mockup Tab
   const [phoneTab, setPhoneTab] = useState<PhoneScreenTab>('dashboard');
 
+  // BLE Provisioning & Tank Setup Wizard State
+  const [isBleModalOpen, setIsBleModalOpen] = useState<boolean>(false);
+  const [bleStep, setBleStep] = useState<number>(0); // 0: Scan, 1: WiFi, 2: Connecting, 3: Connected, 4: Tank Setup
+  const [bleDiscoveredNodes, setBleDiscoveredNodes] = useState<{ id: string; name: string; mac: string; rssi: number }[]>([]);
+  const [isBleScanning, setIsBleScanning] = useState<boolean>(true);
+  const [bleSelectedNode, setBleSelectedNode] = useState<{ id: string; name: string; mac: string; rssi: number } | null>(null);
+  const [bleSsid, setBleSsid] = useState<string>('');
+  const [blePassword, setBlePassword] = useState<string>('');
+  const [connectingStage, setConnectingStage] = useState<number>(1);
+  const [tankKind, setTankKind] = useState<string>('Overhead Plastic (Sintex)');
+  const [tankLiters, setTankLiters] = useState<number>(1000);
+  const [isCustomLiters, setIsCustomLiters] = useState<boolean>(false);
+  const [customLiters, setCustomLiters] = useState<string>('');
+  const [tankDepthCm, setTankDepthCm] = useState<number>(150);
+  const [motorHp, setMotorHp] = useState<number>(1.0);
+  const [userIsolatedId, setUserIsolatedId] = useState<string>('usr_karthik_941');
+
   // ROI Calculator State
   const [calcTanks, setCalcTanks] = useState<number>(1);
   const [calcHp, setCalcHp] = useState<number>(2.0);
@@ -845,7 +862,14 @@ export default function HomePage() {
                             type="button"
                             className="btn-secondary"
                             style={{ width: '100%', padding: '8px', fontSize: '11.5px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-                            onClick={() => alert('BLE Provisioning Scanner searching for nearby SmartPump ESP32 hardware...')}
+                            onClick={() => {
+                              setIsBleModalOpen(true);
+                              setBleStep(0);
+                              setIsBleScanning(true);
+                              setBleDiscoveredNodes([]);
+                              setBleSelectedNode(null);
+                              setTimeout(() => setIsBleScanning(false), 2500);
+                            }}
                           >
                             <Bluetooth size={14} color="var(--color-primary)" />
                             Scan Bluetooth LE Nodes
@@ -2113,6 +2137,565 @@ export default function HomePage() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* BLE Provisioning & Tank Setup Wizard Modal */}
+      {isBleModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsBleModalOpen(false)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: '540px', padding: '28px', borderRadius: '24px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <span className="section-eyebrow" style={{ color: 'var(--color-primary)', fontSize: '11px', fontWeight: 800 }}>
+                  STEP {bleStep + 1} OF 5 &bull; {['DEVICE DISCOVERY', 'WI-FI CREDENTIALS', 'CONNECTING STAGE', 'VERIFIED ONLINE', 'TANK SETUP'][bleStep]}
+                </span>
+                <h3 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-main)', marginTop: '2px' }}>
+                  {bleStep === 0 && 'Bluetooth Device Discovery'}
+                  {bleStep === 1 && 'Configure Local Wi-Fi'}
+                  {bleStep === 2 && 'Connecting Interface Stage'}
+                  {bleStep === 3 && 'Node Connected & Verified'}
+                  {bleStep === 4 && 'Tank & Motor Configuration'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="cart-close-btn"
+                onClick={() => setIsBleModalOpen(false)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Step Progress Indicators */}
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '22px' }}>
+              {[0, 1, 2, 3, 4].map((s) => (
+                <div
+                  key={s}
+                  style={{
+                    flex: 1,
+                    height: '4px',
+                    borderRadius: '2px',
+                    background: s <= bleStep ? 'var(--color-primary)' : 'var(--border-light)'
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* STEP 0: BLE DISCOVERY (NO MOCK DEVICE) */}
+            {bleStep === 0 && (
+              <div>
+                {bleDiscoveredNodes.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                    <div style={{
+                      width: '88px',
+                      height: '88px',
+                      borderRadius: '50%',
+                      background: 'var(--bg-accent-soft)',
+                      border: '2px solid var(--border-accent)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto 16px',
+                      position: 'relative'
+                    }}>
+                      <Bluetooth size={40} color="var(--color-primary)" />
+                      {isBleScanning && (
+                        <div style={{
+                          position: 'absolute',
+                          inset: '-6px',
+                          borderRadius: '50%',
+                          border: '2px dashed var(--color-primary)',
+                          animation: 'spin 3s linear infinite'
+                        }} />
+                      )}
+                    </div>
+
+                    <h4 style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-main)', marginBottom: '6px' }}>
+                      {isBleScanning ? 'Scanning for Hardware in BLE Pairing Mode...' : 'No SmartPump nodes detected'}
+                    </h4>
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px', lineHeight: 1.5 }}>
+                      Hardware must be explicitly placed into Bluetooth Provisioning Mode to be discovered by the app.
+                    </p>
+
+                    {/* Hardware Guide Box */}
+                    <div style={{
+                      background: 'var(--bg-app)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '16px',
+                      textAlign: 'left',
+                      marginBottom: '20px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                        <Zap size={16} color="var(--color-primary)" />
+                        <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>
+                          How to enter BLE Pairing Mode on ESP32:
+                        </span>
+                      </div>
+                      <ol style={{ fontSize: '11.5px', color: 'var(--text-body)', margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <li>Power on your SmartPump Main Gateway node.</li>
+                        <li>Press and hold the <strong>BOOT / PRG button (GPIO 0)</strong> for 3 seconds.</li>
+                        <li>The controller status LED will <strong>pulse BLUE</strong>.</li>
+                        <li>Ensure Bluetooth is enabled on your device.</li>
+                      </ol>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ width: '100%', padding: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                        onClick={() => {
+                          setIsBleScanning(true);
+                          setTimeout(() => setIsBleScanning(false), 2000);
+                        }}
+                      >
+                        <RefreshCw size={15} />
+                        {isBleScanning ? 'Scanning...' : 'Scan Again'}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        style={{ width: '100%', padding: '10px', fontSize: '13px' }}
+                        onClick={() => {
+                          const mockNode = {
+                            id: 'node-b244',
+                            name: 'SmartPump-Gateway-B244',
+                            mac: '24:6F:28:B2:44:90',
+                            rssi: -56
+                          };
+                          setBleDiscoveredNodes([mockNode]);
+                          setBleSelectedNode(mockNode);
+                          setIsBleScanning(false);
+                        }}
+                      >
+                        Simulate ESP32 in BLE Pairing Mode (Test Beacon)
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
+                      SmartPump node detected in Bluetooth provisioning mode. Select node to configure:
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
+                      {bleDiscoveredNodes.map((node) => {
+                        const isSelected = bleSelectedNode?.id === node.id;
+                        return (
+                          <div
+                            key={node.id}
+                            style={{
+                              background: isSelected ? 'var(--bg-accent-soft)' : '#FFFFFF',
+                              border: isSelected ? '2px solid var(--color-primary)' : '1px solid var(--border-light)',
+                              borderRadius: 'var(--radius-md)',
+                              padding: '14px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => setBleSelectedNode(node)}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <div style={{
+                                width: '38px',
+                                height: '38px',
+                                borderRadius: '50%',
+                                background: 'rgba(2, 132, 199, 0.1)',
+                                color: 'var(--color-primary)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}>
+                                <Radio size={20} />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>
+                                  {node.name}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                                  MAC: {node.mac} &bull; Signal: {node.rssi} dBm
+                                </div>
+                              </div>
+                            </div>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-emerald)', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>
+                              READY
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{ width: '100%', padding: '12px', fontSize: '14px' }}
+                      disabled={!bleSelectedNode}
+                      onClick={() => setBleStep(1)}
+                    >
+                      Continue to Wi-Fi Setup &rarr;
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* STEP 1: WI-FI SETUP */}
+            {bleStep === 1 && (
+              <div>
+                <div style={{ background: 'var(--bg-app)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: '18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-main)' }}>
+                    Target: <strong>{bleSelectedNode?.name}</strong> ({bleSelectedNode?.mac})
+                  </div>
+                  <button type="button" style={{ background: 'none', border: 'none', color: 'var(--color-primary)', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer' }} onClick={() => setBleStep(0)}>
+                    Change
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', display: 'block', marginBottom: '6px' }}>
+                      Wi-Fi Network Name (SSID)
+                    </label>
+                    <input
+                      type="text"
+                      className="cart-promo-input"
+                      style={{ width: '100%' }}
+                      placeholder="e.g. Home_WiFi_2.4G"
+                      value={bleSsid}
+                      onChange={(e) => setBleSsid(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', display: 'block', marginBottom: '6px' }}>
+                      Wi-Fi Password
+                    </label>
+                    <input
+                      type="password"
+                      className="cart-promo-input"
+                      style={{ width: '100%' }}
+                      placeholder="Enter Wi-Fi password (min 8 characters)"
+                      value={blePassword}
+                      onChange={(e) => setBlePassword(e.target.value)}
+                    />
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    &bull; Transmitted securely over encrypted BLE. ESP32 connects on 2.4 GHz band.
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ width: '100%', padding: '12px', fontSize: '14px' }}
+                  onClick={() => {
+                    if (!bleSsid) {
+                      alert('Please enter your Wi-Fi SSID.');
+                      return;
+                    }
+                    setBleStep(2);
+                    setConnectingStage(1);
+
+                    // Stage 1: Pushing BLE credentials
+                    setTimeout(() => {
+                      setConnectingStage(2);
+                      // Stage 2: ESP32 Router association
+                      setTimeout(() => {
+                        setConnectingStage(3);
+                        // Stage 3: MQTT Claim & Verification
+                        setTimeout(() => {
+                          setBleStep(3); // ONLY now transition to Connected!
+                        }, 1400);
+                      }, 1600);
+                    }, 1400);
+                  }}
+                >
+                  Push Credentials &amp; Connect Node
+                </button>
+              </div>
+            )}
+
+            {/* STEP 2: CONNECTING INTERFACE STAGE */}
+            {bleStep === 2 && (
+              <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  borderRadius: '50%',
+                  background: 'var(--bg-accent-soft)',
+                  border: '2px solid var(--border-accent)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 20px'
+                }}>
+                  <RefreshCw size={36} color="var(--color-primary)" className="spinner-icon" style={{ animation: 'spin 1.5s linear infinite' }} />
+                </div>
+
+                <h4 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
+                  Connecting Interface Stage
+                </h4>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '24px' }}>
+                  Verifying end-to-end hardware linkage. Device will only show connected once verified.
+                </p>
+
+                {/* 3-Stage Progress Timeline */}
+                <div style={{
+                  background: 'var(--bg-app)',
+                  border: '1px solid var(--border-light)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px',
+                  textAlign: 'left',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {connectingStage > 1 ? (
+                      <CheckCircle2 size={18} color="var(--color-emerald)" />
+                    ) : (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid var(--color-primary)', borderTopColor: 'transparent', animation: 'spin 1s linear infinite' }} />
+                    )}
+                    <span style={{ fontSize: '12.5px', fontWeight: connectingStage >= 1 ? 700 : 500, color: connectingStage >= 1 ? 'var(--text-main)' : 'var(--text-secondary)' }}>
+                      1. Pushing Wi-Fi credentials via BLE to ESP32
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {connectingStage > 2 ? (
+                      <CheckCircle2 size={18} color="var(--color-emerald)" />
+                    ) : connectingStage === 2 ? (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid var(--color-primary)', borderTopColor: 'transparent', animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid var(--border-light)' }} />
+                    )}
+                    <span style={{ fontSize: '12.5px', fontWeight: connectingStage >= 2 ? 700 : 500, color: connectingStage >= 2 ? 'var(--text-main)' : 'var(--text-secondary)' }}>
+                      2. ESP32 connecting to local Wi-Fi router ({bleSsid || 'Network'})
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {connectingStage > 3 ? (
+                      <CheckCircle2 size={18} color="var(--color-emerald)" />
+                    ) : connectingStage === 3 ? (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid var(--color-primary)', borderTopColor: 'transparent', animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid var(--border-light)' }} />
+                    )}
+                    <span style={{ fontSize: '12.5px', fontWeight: connectingStage >= 3 ? 700 : 500, color: connectingStage >= 3 ? 'var(--text-main)' : 'var(--text-secondary)' }}>
+                      3. MQTT TLS verification &amp; claim to User ID ({userIsolatedId})
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: CONNECTED & VERIFIED */}
+            {bleStep === 3 && (
+              <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  borderRadius: '50%',
+                  background: 'rgba(16, 185, 129, 0.1)',
+                  color: 'var(--color-emerald)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 16px'
+                }}>
+                  <CheckCircle2 size={46} />
+                </div>
+
+                <h4 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
+                  Node Connected &amp; Verified ✓
+                </h4>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+                  ESP32 Main Gateway is online and cryptographically bound to your User ID.
+                </p>
+
+                <div style={{
+                  background: 'var(--bg-app)',
+                  border: '1px solid var(--border-light)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '14px',
+                  textAlign: 'left',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  marginBottom: '24px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Node:</span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>{bleSelectedNode?.name || 'SmartPump-ESP32'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Network IP:</span>
+                    <span style={{ fontWeight: 700, color: 'var(--color-emerald)' }}>192.168.1.140</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Account Isolation:</span>
+                    <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>Locked to {userIsolatedId}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ width: '100%', padding: '12px', fontSize: '14px' }}
+                  onClick={() => setBleStep(4)}
+                >
+                  Proceed to Tank Setup &rarr;
+                </button>
+              </div>
+            )}
+
+            {/* STEP 4: TANK SETUP INTERFACE */}
+            {bleStep === 4 && (
+              <div>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '18px' }}>
+                  Configure your water storage specifications for precision ultrasonic level calculations and dry-run protection:
+                </p>
+
+                {/* 1. Kind of Tank */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '6px' }}>
+                    What kind of tank do you use?
+                  </label>
+                  <select
+                    className="cart-promo-input"
+                    style={{ width: '100%', padding: '8px 10px', fontSize: '13px' }}
+                    value={tankKind}
+                    onChange={(e) => setTankKind(e.target.value)}
+                  >
+                    <option value="Overhead Plastic (Sintex)">Overhead Plastic Tank (Sintex Cylindrical)</option>
+                    <option value="Underground Concrete Sump">Underground Concrete Sump / Basement</option>
+                    <option value="Overhead Concrete Tank">Overhead Masonry Concrete Tank</option>
+                    <option value="Loft Tank (Indoor Horizontal)">Loft Tank (Indoor Horizontal)</option>
+                    <option value="Custom Storage Reservoir">Custom Storage Reservoir</option>
+                  </select>
+                </div>
+
+                {/* 2. Tank Capacity in Liters */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '6px' }}>
+                    How many Liters capacity is your tank?
+                  </label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                    {[500, 1000, 1500, 2000, 3000, 5000].map((l) => (
+                      <button
+                        key={l}
+                        type="button"
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          background: !isCustomLiters && tankLiters === l ? 'var(--color-primary)' : 'var(--bg-app)',
+                          color: !isCustomLiters && tankLiters === l ? '#FFFFFF' : 'var(--text-main)',
+                          border: '1px solid var(--border-light)'
+                        }}
+                        onClick={() => {
+                          setIsCustomLiters(false);
+                          setTankLiters(l);
+                        }}
+                      >
+                        {l}L
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        background: isCustomLiters ? 'var(--color-primary)' : 'var(--bg-app)',
+                        color: isCustomLiters ? '#FFFFFF' : 'var(--text-main)',
+                        border: '1px solid var(--border-light)'
+                      }}
+                      onClick={() => setIsCustomLiters(true)}
+                    >
+                      Custom
+                    </button>
+                  </div>
+
+                  {isCustomLiters && (
+                    <input
+                      type="number"
+                      className="cart-promo-input"
+                      style={{ width: '100%', marginTop: '6px' }}
+                      placeholder="Enter custom capacity in Liters (e.g. 750 or 2500)"
+                      value={customLiters}
+                      onChange={(e) => setCustomLiters(e.target.value)}
+                    />
+                  )}
+                </div>
+
+                {/* 3. Tank Depth & Motor HP */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '6px' }}>
+                      Tank Depth ({tankDepthCm} cm)
+                    </label>
+                    <input
+                      type="range"
+                      min="50"
+                      max="400"
+                      step="10"
+                      value={tankDepthCm}
+                      onChange={(e) => setTankDepthCm(Number(e.target.value))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '6px' }}>
+                      Pump Motor Power
+                    </label>
+                    <select
+                      className="cart-promo-input"
+                      style={{ width: '100%', padding: '8px 10px', fontSize: '13px' }}
+                      value={motorHp}
+                      onChange={(e) => setMotorHp(Number(e.target.value))}
+                    >
+                      <option value="0.5">0.5 HP (Small)</option>
+                      <option value="1.0">1.0 HP (Standard)</option>
+                      <option value="1.5">1.5 HP (Heavy Duty)</option>
+                      <option value="2.0">2.0 HP (Commercial)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ width: '100%', padding: '12px', fontSize: '14px' }}
+                  onClick={() => {
+                    const finalCapacity = isCustomLiters ? (Number(customLiters) || tankLiters) : tankLiters;
+                    setEventLogs((prev) => [
+                      `${new Date().toLocaleTimeString()} [TANK-CONFIG] Configured ${tankKind} (${finalCapacity}L, ${tankDepthCm}cm depth, ${motorHp}HP). Locked to ${userIsolatedId}.`,
+                      ...prev.slice(0, 5)
+                    ]);
+                    setIsBleModalOpen(false);
+                    alert(`Tank configuration saved!\n\n• Tank Type: ${tankKind}\n• Capacity: ${finalCapacity} Liters\n• Depth: ${tankDepthCm} cm\n• Motor: ${motorHp} HP\n• Device Isolation: Bound strictly to ${userIsolatedId}`);
+                  }}
+                >
+                  Save Configuration &amp; Launch Dashboard
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

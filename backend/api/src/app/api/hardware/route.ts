@@ -32,7 +32,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Validation failed', details: parsed.error.format() }, { status: 400 });
     }
 
-    const { serialNumber, name } = parsed.data;
+    const {
+      serialNumber,
+      name,
+      tankType = 'Overhead Plastic (Sintex)',
+      tankCapacityLiters = 1000,
+      tankDepthCm = 150,
+      sensorOffsetCm = 15,
+      motorHp = 1.0
+    } = parsed.data;
 
     // Check if hardware exists
     let hardware = await prisma.hardware.findUnique({
@@ -88,7 +96,17 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ message: 'Device successfully claimed', hardware }, { status: 201 });
+    return NextResponse.json({
+      message: 'Device successfully claimed and isolated to user account',
+      hardware,
+      tankConfig: {
+        tankType,
+        tankCapacityLiters,
+        tankDepthCm,
+        sensorOffsetCm,
+        motorHp,
+      }
+    }, { status: 201 });
   } catch (error) {
     console.error('Claim error:', error);
     return NextResponse.json({ error: 'Internal server error claiming device' }, { status: 500 });

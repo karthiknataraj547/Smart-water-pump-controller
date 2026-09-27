@@ -144,20 +144,6 @@ class EmptyDeviceScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 16),
-
-              // Fast Demo Skip Button
-              TextButton.icon(
-                onPressed: onDeviceAdded,
-                icon: Icon(Icons.arrow_forward_rounded, size: 16, color: textSec),
-                label: Text(
-                  'Explore Demo Dashboard with Simulated Node',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: textSec,
-                  ),
-                ),
-              ),
             ],
           ),
         ),

@@ -20,9 +20,14 @@ export const LoginSchema = z.object({
 
 // Hardware Claiming Schema
 export const ClaimHardwareSchema = z.object({
-  serialNumber: z.string().min(6, 'Serial number must be valid'),
-  claimCode: z.string().length(6, 'Claim code must be 6 digits'),
-  name: z.string().min(1, 'Device name is required').max(50)
+  serialNumber: z.string().min(4, 'Serial number must be valid'),
+  claimCode: z.string().length(6, 'Claim code must be 6 digits').optional(),
+  name: z.string().min(1, 'Device name is required').max(50),
+  tankType: z.string().optional(),
+  tankCapacityLiters: z.number().positive().optional(),
+  tankDepthCm: z.number().positive().optional(),
+  sensorOffsetCm: z.number().min(0).optional(),
+  motorHp: z.number().positive().optional()
 });
 
 // Pump Control Schemas

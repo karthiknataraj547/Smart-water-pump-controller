@@ -52,6 +52,7 @@ class AppColors {
   static const amberWarning = Color(0xFFF59E0B); // Amber 500
   static const amberGlow = Color(0x1FF59E0B);
   static const crimsonError = Color(0xFFEF4444); // Red 500
+  static const crimsonCritical = Color(0xFFEF4444); // Red 500 alias
   static const crimsonDark = Color(0xFFDC2626); // Red 600
   static const crimsonGlow = Color(0x28EF4444);
 

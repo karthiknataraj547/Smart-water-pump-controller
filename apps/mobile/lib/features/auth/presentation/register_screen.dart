@@ -20,6 +20,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -32,16 +33,59 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   }
 
   void _handleRegister() async {
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 700));
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final mobile = _mobileController.text.trim();
+    final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
 
-    if (mounted) {
-      setState(() => _isLoading = false);
-      ref.read(authProvider.notifier).login(
-            _emailController.text.isNotEmpty ? _emailController.text : 'user@smartpump.io',
-            hasHardware: false, // New user has no hardware -> leads to Empty-Device wizard!
+    if (name.isEmpty) {
+      setState(() => _errorMessage = 'Please enter your full name.');
+      return;
+    }
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _errorMessage = 'Please enter a valid email address.');
+      return;
+    }
+    if (password.length < 8) {
+      setState(() => _errorMessage = 'Password must be at least 8 characters.');
+      return;
+    }
+    if (password != confirmPassword) {
+      setState(() => _errorMessage = 'Passwords do not match.');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await ref.read(authProvider.notifier).register(
+            email: email,
+            password: password,
+            fullName: name,
+            phoneNumber: mobile.isNotEmpty ? mobile : null,
           );
-      Navigator.pop(context);
+
+      if (mounted) {
+        Navigator.pop(context); // Return to root shell which now displays EmptyDeviceScreen
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.message;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Registration failed: ${e.toString()}';
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -79,10 +123,38 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Register your IoT profile to start managing water pumps',
+                'Register your IoT profile to isolate and manage your pump nodes',
                 style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
+
+              // Error Banner
+              if (_errorMessage != null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.crimsonGlow,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.crimsonError.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline_rounded, color: AppColors.crimsonError, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.crimsonError,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
               // Full Name
               TextField(
@@ -90,6 +162,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 style: GoogleFonts.plusJakartaSans(fontSize: 14, color: textPrim),
                 decoration: InputDecoration(
                   labelText: 'Full Name',
+                  hintText: 'John Doe',
                   prefixIcon: Icon(Icons.person_outline_rounded, color: textSec, size: 20),
                 ),
               ),
@@ -102,6 +175,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 style: GoogleFonts.plusJakartaSans(fontSize: 14, color: textPrim),
                 decoration: InputDecoration(
                   labelText: 'Email Address',
+                  hintText: 'name@example.com',
                   prefixIcon: Icon(Icons.mail_outline_rounded, color: textSec, size: 20),
                 ),
               ),
@@ -113,7 +187,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 keyboardType: TextInputType.phone,
                 style: GoogleFonts.plusJakartaSans(fontSize: 14, color: textPrim),
                 decoration: InputDecoration(
-                  labelText: 'Mobile Phone',
+                  labelText: 'Mobile Phone (Optional)',
+                  hintText: '+91 98765 43210',
                   prefixIcon: Icon(Icons.phone_outlined, color: textSec, size: 20),
                 ),
               ),
@@ -125,7 +200,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 obscureText: _obscurePassword,
                 style: GoogleFonts.plusJakartaSans(fontSize: 14, color: textPrim),
                 decoration: InputDecoration(
-                  labelText: 'Password',
+                  labelText: 'Password (Min 8 chars)',
                   prefixIcon: Icon(Icons.lock_outline_rounded, color: textSec, size: 20),
                   suffixIcon: IconButton(
                     icon: Icon(
@@ -166,7 +241,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   child: _isLoading
                       ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5))
                       : Text(
-                          'Create Account',
+                          'Create Account & Continue',
                           style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700),
                         ),
                 ),
