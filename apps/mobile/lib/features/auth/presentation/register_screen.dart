@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/auth/auth_provider.dart';
+import '../../../core/api/api_client.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -30,6 +31,184 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  void _showServerConfigDialog(BuildContext context, bool isDark) async {
+    final currentCustom = await defaultApiClient.getCustomServerUrl();
+    final activeUrl = defaultApiClient.activeBaseUrl;
+    final serverController = TextEditingController(text: currentCustom ?? activeUrl);
+    String? statusMsg;
+    bool isSuccess = false;
+    bool isTesting = false;
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final surface = isDark ? AppColors.darkSurface : AppColors.lightSurface;
+          final textPrim = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+          final textSec = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+
+          return AlertDialog(
+            backgroundColor: surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Row(
+              children: [
+                Icon(Icons.router_rounded, color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric, size: 24),
+                const SizedBox(width: 10),
+                Text(
+                  'Server Connection',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontWeight: FontWeight.w700,
+                    color: textPrim,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Specify backend server IP or URL. Auto-discovery tries Wi-Fi and USB.',
+                    style: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: serverController,
+                    style: TextStyle(color: textPrim, fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: 'Backend URL / IP',
+                      hintText: 'http://192.168.31.55:3000',
+                      prefixIcon: const Icon(Icons.link_rounded, size: 20),
+                      suffixIcon: IconButton(
+                        icon: isTesting
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.bolt_rounded, size: 20),
+                        tooltip: 'Test Connection',
+                        onPressed: isTesting
+                            ? null
+                            : () async {
+                                setDialogState(() {
+                                  isTesting = true;
+                                  statusMsg = null;
+                                });
+                                final target = serverController.text.trim();
+                                final ok = await defaultApiClient.testServerUrl(target);
+                                setDialogState(() {
+                                  isTesting = false;
+                                  isSuccess = ok;
+                                  statusMsg = ok
+                                      ? 'Server is ONLINE and reachable!'
+                                      : 'Unable to reach server. Please check IP and Wi-Fi.';
+                                });
+                              },
+                      ),
+                    ),
+                  ),
+                  if (statusMsg != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSuccess
+                            ? Colors.green.withValues(alpha: 0.15)
+                            : Colors.red.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isSuccess
+                              ? Colors.green.withValues(alpha: 0.4)
+                              : Colors.red.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isSuccess ? Icons.check_circle_outline_rounded : Icons.error_outline_rounded,
+                            size: 16,
+                            color: isSuccess ? Colors.green : Colors.redAccent,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              statusMsg!,
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isSuccess ? Colors.green : Colors.redAccent,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  Text(
+                    'Quick Presets:',
+                    style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w600, color: textSec),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      ActionChip(
+                        label: const Text('192.168.31.55:3000 (Wi-Fi)', style: TextStyle(fontSize: 11)),
+                        onPressed: () {
+                          serverController.text = 'http://192.168.31.55:3000';
+                        },
+                      ),
+                      ActionChip(
+                        label: const Text('localhost:3000 (USB)', style: TextStyle(fontSize: 11)),
+                        onPressed: () {
+                          serverController.text = 'http://localhost:3000';
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('Cancel', style: TextStyle(color: textSec)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                  foregroundColor: isDark ? Colors.black : Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () async {
+                  final target = serverController.text.trim();
+                  final messenger = ScaffoldMessenger.of(context);
+                  await defaultApiClient.setCustomServerUrl(target);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) {
+                    setState(() {
+                      _errorMessage = null;
+                    });
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text('Server endpoint updated to: $target'),
+                        backgroundColor: Colors.teal,
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Save Endpoint'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   void _handleRegister() async {
@@ -118,6 +297,18 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           icon: Icon(Icons.arrow_back_ios_new_rounded, color: textPrim, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Server Connection Settings',
+            onPressed: () => _showServerConfigDialog(context, isDark),
+            icon: Icon(
+              Icons.router_rounded,
+              color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -152,20 +343,49 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: AppColors.crimsonError.withValues(alpha: 0.3)),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.error_outline_rounded, color: AppColors.crimsonError, size: 20),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.crimsonError,
+                      Row(
+                        children: [
+                          Icon(Icons.error_outline_rounded, color: AppColors.crimsonError, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.crimsonError,
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
+                      if (_errorMessage!.contains('reach') ||
+                          _errorMessage!.contains('network') ||
+                          _errorMessage!.contains('connect') ||
+                          _errorMessage!.contains('server')) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton.icon(
+                              style: TextButton.styleFrom(
+                                foregroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              onPressed: () => _showServerConfigDialog(context, isDark),
+                              icon: const Icon(Icons.settings_ethernet_rounded, size: 16),
+                              label: const Text(
+                                'Change Server IP / Test',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
