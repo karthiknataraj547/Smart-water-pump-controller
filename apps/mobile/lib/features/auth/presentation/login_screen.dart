@@ -65,6 +65,140 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  void _showForgotPasswordDialog(BuildContext context, bool isDark) {
+    final emailController = TextEditingController(text: _emailController.text.trim());
+    final passController = TextEditingController();
+    String? dialogError;
+    bool dialogLoading = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final surface = isDark ? AppColors.darkSurface : AppColors.lightSurface;
+          final textPrim = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+          final textSec = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+
+          return AlertDialog(
+            backgroundColor: surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text(
+              'Reset Password',
+              style: GoogleFonts.plusJakartaSans(
+                fontWeight: FontWeight.w700,
+                color: textPrim,
+              ),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Enter your registered email and choose a new password.',
+                    style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec),
+                  ),
+                  const SizedBox(height: 16),
+                  if (dialogError != null)
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                      ),
+                      child: Text(
+                        dialogError!,
+                        style: GoogleFonts.plusJakartaSans(color: Colors.redAccent, fontSize: 12),
+                      ),
+                    ),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    style: TextStyle(color: textPrim, fontSize: 14),
+                    decoration: const InputDecoration(
+                      labelText: 'Registered Email',
+                      prefixIcon: Icon(Icons.email_outlined, size: 20),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passController,
+                    obscureText: true,
+                    style: TextStyle(color: textPrim, fontSize: 14),
+                    decoration: const InputDecoration(
+                      labelText: 'New Password (min 8 chars, 1 uppercase, 1 digit)',
+                      prefixIcon: Icon(Icons.lock_reset_rounded, size: 20),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('Cancel', style: TextStyle(color: textSec)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                  foregroundColor: isDark ? Colors.black : Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: dialogLoading
+                    ? null
+                    : () async {
+                        final em = emailController.text.trim();
+                        final pw = passController.text;
+                        if (em.isEmpty || !em.contains('@')) {
+                          setDialogState(() => dialogError = 'Please enter a valid email.');
+                          return;
+                        }
+                        if (pw.length < 8) {
+                          setDialogState(() => dialogError = 'Password must be at least 8 characters.');
+                          return;
+                        }
+                        if (!RegExp(r'[A-Z]').hasMatch(pw) ||
+                            !RegExp(r'[a-z]').hasMatch(pw) ||
+                            !RegExp(r'[0-9]').hasMatch(pw)) {
+                          setDialogState(() => dialogError = 'Must contain uppercase, lowercase, and number.');
+                          return;
+                        }
+                        setDialogState(() {
+                          dialogLoading = true;
+                          dialogError = null;
+                        });
+                        try {
+                          await ref.read(authProvider.notifier).resetPassword(em, pw);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) {
+                            _passwordController.text = pw;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Password updated successfully! You can now sign in.'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          setDialogState(() {
+                            dialogLoading = false;
+                            dialogError = e.toString().replaceAll('Exception: ', '');
+                          });
+                        }
+                      },
+                child: dialogLoading
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Update Password'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
@@ -237,13 +371,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Password recovery link sent if email exists.'),
-                        ),
-                      );
-                    },
+                    onPressed: () => _showForgotPasswordDialog(context, isDark),
                     child: Text(
                       'Forgot password?',
                       style: GoogleFonts.plusJakartaSans(

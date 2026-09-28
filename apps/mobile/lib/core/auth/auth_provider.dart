@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -116,20 +118,32 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
 
       if (response.statusCode == 200 && response.data != null) {
-        final data = response.data as Map<String, dynamic>;
-        final user = data['user'] as Map<String, dynamic>? ?? {};
-        final tokens = data['tokens'] as Map<String, dynamic>? ?? {};
+        final Map<String, dynamic> data = (response.data is Map)
+            ? Map<String, dynamic>.from(response.data as Map)
+            : (response.data is String
+                ? Map<String, dynamic>.from(jsonDecode(response.data as String) as Map)
+                : <String, dynamic>{});
+        final Map<String, dynamic> user = (data['user'] is Map)
+            ? Map<String, dynamic>.from(data['user'] as Map)
+            : <String, dynamic>{};
+        final Map<String, dynamic> tokens = (data['tokens'] is Map)
+            ? Map<String, dynamic>.from(data['tokens'] as Map)
+            : <String, dynamic>{};
 
-        final accessToken = tokens['accessToken'] as String? ?? '';
-        final userId = user['id'] as String? ?? 'usr_${cleanEmail.hashCode.abs()}';
-        final fullName = user['fullName'] as String? ?? cleanEmail.split('@').first;
+        final accessToken = tokens['accessToken']?.toString() ?? '';
+        final userId = user['id']?.toString() ?? 'usr_${cleanEmail.hashCode.abs()}';
+        final fullName = user['fullName']?.toString() ?? cleanEmail.split('@').first;
         final hasHardware = user['hasHardware'] == true;
 
-        await _storage.write(key: 'sp_auth_token', value: accessToken);
-        await _storage.write(key: 'sp_user_id', value: userId);
-        await _storage.write(key: 'sp_user_email', value: cleanEmail);
-        await _storage.write(key: 'sp_user_name', value: fullName);
-        await _storage.write(key: 'sp_has_hardware', value: hasHardware ? 'true' : 'false');
+        try {
+          await _storage.write(key: 'sp_auth_token', value: accessToken);
+          await _storage.write(key: 'sp_user_id', value: userId);
+          await _storage.write(key: 'sp_user_email', value: cleanEmail);
+          await _storage.write(key: 'sp_user_name', value: fullName);
+          await _storage.write(key: 'sp_has_hardware', value: hasHardware ? 'true' : 'false');
+        } catch (storageErr) {
+          debugPrint('[AuthProvider] SecureStorage write warning: $storageErr');
+        }
 
         state = AuthState(
           isAuthenticated: true,
@@ -207,18 +221,30 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
 
       if (response.statusCode == 201 || response.statusCode == 200) {
-        final data = response.data as Map<String, dynamic>;
-        final user = data['user'] as Map<String, dynamic>? ?? {};
-        final tokens = data['tokens'] as Map<String, dynamic>? ?? {};
+        final Map<String, dynamic> data = (response.data is Map)
+            ? Map<String, dynamic>.from(response.data as Map)
+            : (response.data is String
+                ? Map<String, dynamic>.from(jsonDecode(response.data as String) as Map)
+                : <String, dynamic>{});
+        final Map<String, dynamic> user = (data['user'] is Map)
+            ? Map<String, dynamic>.from(data['user'] as Map)
+            : <String, dynamic>{};
+        final Map<String, dynamic> tokens = (data['tokens'] is Map)
+            ? Map<String, dynamic>.from(data['tokens'] as Map)
+            : <String, dynamic>{};
 
-        final accessToken = tokens['accessToken'] as String? ?? '';
-        final userId = user['id'] as String? ?? 'usr_${cleanEmail.hashCode.abs()}';
+        final accessToken = tokens['accessToken']?.toString() ?? '';
+        final userId = user['id']?.toString() ?? 'usr_${cleanEmail.hashCode.abs()}';
 
-        await _storage.write(key: 'sp_auth_token', value: accessToken);
-        await _storage.write(key: 'sp_user_id', value: userId);
-        await _storage.write(key: 'sp_user_email', value: cleanEmail);
-        await _storage.write(key: 'sp_user_name', value: fullName);
-        await _storage.write(key: 'sp_has_hardware', value: 'false'); // Brand new user has no hardware yet
+        try {
+          await _storage.write(key: 'sp_auth_token', value: accessToken);
+          await _storage.write(key: 'sp_user_id', value: userId);
+          await _storage.write(key: 'sp_user_email', value: cleanEmail);
+          await _storage.write(key: 'sp_user_name', value: fullName);
+          await _storage.write(key: 'sp_has_hardware', value: 'false');
+        } catch (storageErr) {
+          debugPrint('[AuthProvider] SecureStorage write warning: $storageErr');
+        }
 
         state = AuthState(
           isAuthenticated: true,
@@ -246,6 +272,40 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } catch (e) {
       if (e is AuthException) rethrow;
       throw AuthException('Registration error: ${e.toString()}');
+    }
+  }
+
+  /// Reset account password
+  Future<void> resetPassword(String email, String newPassword) async {
+    final cleanEmail = email.trim().toLowerCase();
+    final cleanPass = newPassword.trim();
+    if (cleanEmail.isEmpty || !cleanEmail.contains('@')) {
+      throw const AuthException('Please enter a valid email address.');
+    }
+    if (cleanPass.length < 8) {
+      throw const AuthException('Password must be at least 8 characters long.');
+    }
+    try {
+      final response = await _apiClient.postWithFallback(
+        '/api/auth/reset-password',
+        {
+          'email': cleanEmail,
+          'newPassword': cleanPass,
+        },
+      );
+      if (response.statusCode != 200) {
+        throw const AuthException('Password reset failed.');
+      }
+    } on DioException catch (dioErr) {
+      final resData = dioErr.response?.data;
+      String errMsg = 'Password reset failed.';
+      if (resData is Map && resData['error'] != null) {
+        errMsg = resData['error'].toString();
+      }
+      throw AuthException(errMsg);
+    } catch (e) {
+      if (e is AuthException) rethrow;
+      throw AuthException('Password reset failed: ${e.toString()}');
     }
   }
 

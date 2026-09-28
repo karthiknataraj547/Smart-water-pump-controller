@@ -23,9 +23,12 @@ export async function POST(req: NextRequest) {
     }
 
     const { email, password } = parsed.data;
+    const cleanEmail = email.trim().toLowerCase();
+
+    console.log(`[Auth Login] Login attempt for "${cleanEmail}" from IP: ${ip}`);
 
     const user = await prisma.user.findUnique({
-      where: { email },
+      where: { email: cleanEmail },
       include: {
         _count: {
           select: { hardware: true }
@@ -34,13 +37,17 @@ export async function POST(req: NextRequest) {
     });
 
     if (!user) {
+      console.warn(`[Auth Login Failed] No registered user found for email: "${cleanEmail}"`);
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
     }
 
     const isValid = await verifyPassword(password, user.passwordHash);
     if (!isValid) {
+      console.warn(`[Auth Login Failed] Password mismatch for: "${cleanEmail}"`);
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
     }
+
+    console.log(`[Auth Login Success] User authenticated: "${cleanEmail}" (id: ${user.id})`);
 
     // Create session in database
     const session = await prisma.session.create({

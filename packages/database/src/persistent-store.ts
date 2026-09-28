@@ -20,26 +20,73 @@ export interface PersistentDatabaseSchema {
   notificationPreferences: Record<string, any>;
 }
 
+function resolveDataStorePath(): string {
+  if (process.env.SMARTPUMP_DATA_PATH) {
+    return process.env.SMARTPUMP_DATA_PATH;
+  }
+  const searchRoots = [
+    process.cwd(),
+    path.resolve(process.cwd(), '..'),
+    path.resolve(process.cwd(), '../..'),
+    __dirname,
+    path.resolve(__dirname, '..'),
+    path.resolve(__dirname, '../..'),
+    path.resolve(__dirname, '../../..'),
+    path.resolve(__dirname, '../../../../..'),
+  ];
+  for (const dir of searchRoots) {
+    if (
+      fs.existsSync(path.join(dir, 'pnpm-workspace.yaml')) ||
+      (fs.existsSync(path.join(dir, 'package.json')) && fs.existsSync(path.join(dir, 'packages')))
+    ) {
+      const dataDir = path.join(dir, '.data');
+      if (!fs.existsSync(dataDir)) {
+        try { fs.mkdirSync(dataDir, { recursive: true }); } catch (_) {}
+      }
+      return path.join(dataDir, 'smartpump_store.json');
+    }
+  }
+  const fallback = path.resolve(process.cwd(), '.data');
+  if (!fs.existsSync(fallback)) {
+    try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
+  }
+  return path.join(fallback, 'smartpump_store.json');
+}
+
 export class PersistentDataStore {
   private filePath: string;
   private data: PersistentDatabaseSchema;
 
   constructor() {
-    const dataDir = path.resolve(__dirname, '..', '..', '..', '.data');
-    if (!fs.existsSync(dataDir)) {
-      try {
-        fs.mkdirSync(dataDir, { recursive: true });
-      } catch (_) {}
-    }
-    this.filePath = path.join(dataDir, 'smartpump_store.json');
+    this.filePath = resolveDataStorePath();
     this.data = this.load();
   }
 
   private load(): PersistentDatabaseSchema {
     try {
+      // 1. Try primary path
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         return JSON.parse(raw);
+      }
+      // 2. Check alternative Next.js server bundle path if exists
+      const altPaths = [
+        path.resolve(process.cwd(), '.next/server/app/.data/smartpump_store.json'),
+        path.resolve(__dirname, '../../..', '.data/smartpump_store.json'),
+        path.resolve(process.cwd(), '.data/smartpump_store.json'),
+      ];
+      for (const alt of altPaths) {
+        if (fs.existsSync(alt)) {
+          const raw = fs.readFileSync(alt, 'utf8');
+          const parsed = JSON.parse(raw);
+          // Copy to primary
+          try {
+            const dir = path.dirname(this.filePath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(this.filePath, raw, 'utf8');
+          } catch (_) {}
+          return parsed;
+        }
       }
     } catch (e) {
       console.warn('[PersistentStore] Could not load existing store, initializing empty store:', e);
@@ -65,6 +112,10 @@ export class PersistentDataStore {
 
   private save() {
     try {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
       fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
     } catch (e) {
       console.error('[PersistentStore] Failed to write data file:', e);
