@@ -51,10 +51,24 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       setState(() => _errorMessage = 'Password must be at least 8 characters.');
       return;
     }
+    if (!RegExp(r'[A-Z]').hasMatch(password)) {
+      setState(() => _errorMessage = 'Password must contain at least one uppercase letter (A-Z).');
+      return;
+    }
+    if (!RegExp(r'[a-z]').hasMatch(password)) {
+      setState(() => _errorMessage = 'Password must contain at least one lowercase letter (a-z).');
+      return;
+    }
+    if (!RegExp(r'[0-9]').hasMatch(password)) {
+      setState(() => _errorMessage = 'Password must contain at least one number (0-9).');
+      return;
+    }
     if (password != confirmPassword) {
       setState(() => _errorMessage = 'Passwords do not match.');
       return;
     }
+
+    final cleanMobile = mobile.replaceAll(RegExp(r'[^\d+]'), '');
 
     setState(() {
       _isLoading = true;
@@ -66,7 +80,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             email: email,
             password: password,
             fullName: name,
-            phoneNumber: mobile.isNotEmpty ? mobile : null,
+            phoneNumber: cleanMobile.isNotEmpty ? cleanMobile : null,
           );
 
       if (mounted) {
@@ -200,7 +214,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 obscureText: _obscurePassword,
                 style: GoogleFonts.plusJakartaSans(fontSize: 14, color: textPrim),
                 decoration: InputDecoration(
-                  labelText: 'Password (Min 8 chars)',
+                  labelText: 'Password',
+                  helperText: 'Min 8 chars, 1 uppercase, 1 lowercase & 1 number',
+                  helperStyle: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
                   prefixIcon: Icon(Icons.lock_outline_rounded, color: textSec, size: 20),
                   suffixIcon: IconButton(
                     icon: Icon(

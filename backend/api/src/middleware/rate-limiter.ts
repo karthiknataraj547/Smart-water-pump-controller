@@ -12,6 +12,16 @@ const memoryStore = new Map<string, RateLimitStore>();
  * Protects login, registration, and pump command endpoints from brute-force or flooding.
  */
 export function checkRateLimit(key: string, limit: number, windowMs: number): { allowed: boolean; remaining: number } {
+  // Never rate-limit in development or for local/ADB/reverse loopback traffic
+  if (
+    process.env.NODE_ENV !== 'production' ||
+    key.includes('127.0.0.1') ||
+    key.includes('localhost') ||
+    key.includes('::1')
+  ) {
+    return { allowed: true, remaining: 999 };
+  }
+
   const now = Date.now();
   const record = memoryStore.get(key);
 

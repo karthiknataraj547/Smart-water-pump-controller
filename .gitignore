@@ -63,3 +63,8 @@ Thumbs.db
 # Mosquitto data
 infrastructure/mosquitto/data/
 infrastructure/mosquitto/log/
+
+# Local persistent fallback data
+.data/
+*.png
+

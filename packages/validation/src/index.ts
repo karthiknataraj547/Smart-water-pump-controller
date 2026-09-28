@@ -10,7 +10,7 @@ export const RegisterSchema = z.object({
     .regex(/[a-z]/, 'Must contain at least one lowercase letter')
     .regex(/[0-9]/, 'Must contain at least one number'),
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
-  phoneNumber: z.string().optional()
+  phoneNumber: z.string().nullable().optional()
 });
 
 export const LoginSchema = z.object({

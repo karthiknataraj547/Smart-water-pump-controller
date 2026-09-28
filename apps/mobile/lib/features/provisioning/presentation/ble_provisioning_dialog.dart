@@ -1197,7 +1197,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                         ),
                       ),
                       child: Text(
-                        '${hp} HP',
+                        '$hp HP',
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,

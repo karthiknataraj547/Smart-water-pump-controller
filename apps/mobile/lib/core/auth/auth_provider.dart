@@ -107,34 +107,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     try {
-      Response response;
-      try {
-        response = await _apiClient.dio.post(
-          '/api/auth/login',
-          data: {
-            'email': cleanEmail,
-            'password': cleanPassword,
-          },
-        );
-      } catch (e) {
-        // If connecting to 10.0.2.2 failed, try localhost fallback (for web / desktop testing)
-        if (e is DioException && (e.type == DioExceptionType.connectionError || e.type == DioExceptionType.connectionTimeout)) {
-          final fallbackClient = Dio(BaseOptions(
-            baseUrl: ApiClient.fallbackLocalUrl,
-            connectTimeout: const Duration(seconds: 4),
-            receiveTimeout: const Duration(seconds: 4),
-          ));
-          response = await fallbackClient.post(
-            '/api/auth/login',
-            data: {
-              'email': cleanEmail,
-              'password': cleanPassword,
-            },
-          );
-        } else {
-          rethrow;
-        }
-      }
+      final response = await _apiClient.postWithFallback(
+        '/api/auth/login',
+        {
+          'email': cleanEmail,
+          'password': cleanPassword,
+        },
+      );
 
       if (response.statusCode == 200 && response.data != null) {
         final data = response.data as Map<String, dynamic>;
@@ -213,37 +192,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     try {
-      Response response;
-      try {
-        response = await _apiClient.dio.post(
-          '/api/auth/register',
-          data: {
-            'email': cleanEmail,
-            'password': cleanPassword,
-            'fullName': fullName.trim(),
-            'phoneNumber': phoneNumber?.trim(),
-          },
-        );
-      } catch (e) {
-        if (e is DioException && (e.type == DioExceptionType.connectionError || e.type == DioExceptionType.connectionTimeout)) {
-          final fallbackClient = Dio(BaseOptions(
-            baseUrl: ApiClient.fallbackLocalUrl,
-            connectTimeout: const Duration(seconds: 4),
-            receiveTimeout: const Duration(seconds: 4),
-          ));
-          response = await fallbackClient.post(
-            '/api/auth/register',
-            data: {
-              'email': cleanEmail,
-              'password': cleanPassword,
-              'fullName': fullName.trim(),
-              'phoneNumber': phoneNumber?.trim(),
-            },
-          );
-        } else {
-          rethrow;
-        }
+      final payload = <String, dynamic>{
+        'email': cleanEmail,
+        'password': cleanPassword,
+        'fullName': fullName.trim(),
+      };
+      if (phoneNumber != null && phoneNumber.trim().isNotEmpty) {
+        payload['phoneNumber'] = phoneNumber.trim();
       }
+
+      final response = await _apiClient.postWithFallback(
+        '/api/auth/register',
+        payload,
+      );
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         final data = response.data as Map<String, dynamic>;
