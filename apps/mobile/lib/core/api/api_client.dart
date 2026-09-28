@@ -2,8 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiClient {
-  // Ordered by priority: Current LAN IP (Wi-Fi), Previous LAN IPs, USB ADB reverse, Emulator
+  // Ordered by priority: Production Cloud (Vercel), Local LAN IP (Wi-Fi), USB ADB reverse, Emulator
   static const List<String> defaultCandidates = [
+    'https://smart-water-pump-controller.vercel.app',
     'http://192.168.31.55:3000',
     'http://192.168.31.54:3000',
     'http://localhost:3000',
@@ -11,7 +12,7 @@ class ApiClient {
     'http://10.0.2.2:3000',
   ];
 
-  static const String defaultBaseUrl = 'http://192.168.31.55:3000';
+  static const String defaultBaseUrl = 'https://smart-water-pump-controller.vercel.app';
 
   late final Dio dio;
   final FlutterSecureStorage _storage;

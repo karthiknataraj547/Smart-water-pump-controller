@@ -24,6 +24,10 @@ function resolveDataStorePath(): string {
   if (process.env.SMARTPUMP_DATA_PATH) {
     return process.env.SMARTPUMP_DATA_PATH;
   }
+  // If running in Vercel or AWS Lambda serverless function, use writable /tmp
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join('/tmp', 'smartpump_store.json');
+  }
   const searchRoots = [
     process.cwd(),
     path.resolve(process.cwd(), '..'),

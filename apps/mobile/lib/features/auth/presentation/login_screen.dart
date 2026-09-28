@@ -191,7 +191,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     runSpacing: 6,
                     children: [
                       ActionChip(
-                        label: const Text('192.168.31.55:3000 (Wi-Fi)', style: TextStyle(fontSize: 11)),
+                        avatar: const Icon(Icons.cloud_done_rounded, size: 16),
+                        label: const Text('Vercel Cloud (Anywhere)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        onPressed: () {
+                          serverController.text = 'https://smart-water-pump-controller.vercel.app';
+                        },
+                      ),
+                      ActionChip(
+                        label: const Text('192.168.31.55:3000 (Local Wi-Fi)', style: TextStyle(fontSize: 11)),
                         onPressed: () {
                           serverController.text = 'http://192.168.31.55:3000';
                         },
