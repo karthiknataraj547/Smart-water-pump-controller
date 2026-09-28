@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken, TokenUserPayload } from '@smartpump/auth';
+import { verifyToken, TokenUserPayload } from '@/lib/server/auth';
 
 export interface AuthenticatedContext {
   user: TokenUserPayload;

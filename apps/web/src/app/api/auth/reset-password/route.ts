@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@smartpump/database';
-import { hashPassword } from '@smartpump/auth';
+import { prisma } from '@/lib/server/database';
+import { hashPassword } from '@/lib/server/auth';
 
 export async function POST(req: NextRequest) {
   try {

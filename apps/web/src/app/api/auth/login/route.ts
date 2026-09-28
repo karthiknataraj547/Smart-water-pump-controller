@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@smartpump/database';
-import { verifyPassword, signAccessToken, signRefreshToken } from '@smartpump/auth';
-import { LoginSchema } from '@smartpump/validation';
+import { prisma } from '@/lib/server/database';
+import { verifyPassword, signAccessToken, signRefreshToken } from '@/lib/server/auth';
+import { LoginSchema } from '@/lib/server/validation';
 import { checkRateLimit, rateLimitResponse } from '@/middleware/rate-limiter';
-import { SYSTEM_CONSTANTS } from '@smartpump/shared';
+import { SYSTEM_CONSTANTS } from '@/lib/server/shared';
 
 export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';

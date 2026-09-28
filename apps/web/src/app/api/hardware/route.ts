@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma, listScopedHardware } from '@smartpump/database';
-import { ClaimHardwareSchema } from '@smartpump/validation';
+import { prisma, listScopedHardware } from '@/lib/server/database';
+import { ClaimHardwareSchema } from '@/lib/server/validation';
 import { authenticateRequest } from '@/middleware/auth-guard';
 
 /**

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@smartpump/database';
+import { prisma } from '@/lib/server/database';
 import { authenticateRequest } from '@/middleware/auth-guard';
 import { verifyHardwareOwnership } from '@/middleware/ownership-guard';
 import { checkRateLimit, rateLimitResponse } from '@/middleware/rate-limiter';
-import { SYSTEM_CONSTANTS } from '@smartpump/shared';
+import { SYSTEM_CONSTANTS } from '@/lib/server/shared';
 
 interface RouteParams {
   params: Promise<{ id: string }>;

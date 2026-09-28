@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getScopedHardware, HardwareOwnershipError } from '@smartpump/database';
+import { getScopedHardware, HardwareOwnershipError } from '@/lib/server/database';
 
 /**
  * Ownership Guard

@@ -1034,13 +1034,10 @@ export default function HomePage() {
 
                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                       <a
-                        href="/downloads/smartpump-v1.2.0.apk"
+                        href="/downloads/smartpump-latest.apk"
+                        download="SmartPump.apk"
                         className="btn-primary"
                         style={{ padding: '10px 18px', fontSize: '13px', textDecoration: 'none' }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          alert('SmartPump APK v1.2.0 is compiled and located in apps/mobile release output folder.');
-                        }}
                       >
                         <Download size={15} />
                         Download APK Directly
@@ -1860,9 +1857,9 @@ export default function HomePage() {
                 <ShoppingCart size={18} />
                 Order SmartPump Starter Kit ($149)
               </a>
-              <a href="#app" className="btn-secondary" style={{ padding: '14px 24px', fontSize: '15px', background: 'transparent', color: '#FFFFFF', borderColor: '#475569' }}>
+              <a href="/downloads/smartpump-latest.apk" download="SmartPump.apk" className="btn-secondary" style={{ padding: '14px 24px', fontSize: '15px', background: 'transparent', color: '#FFFFFF', borderColor: '#475569', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                 <Smartphone size={16} />
-                Get Android APK
+                Download Android APK
               </a>
             </div>
           </div>
@@ -2716,8 +2713,8 @@ export default function HomePage() {
           </div>
 
           <div style={{ display: 'flex', gap: '20px', fontSize: '13px' }}>
-            <a href="#app" style={{ color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 700 }}>
-              Mobile App (APK)
+            <a href="/downloads/smartpump-latest.apk" download="SmartPump.apk" style={{ color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 700 }}>
+              Download Mobile App (APK) &darr;
             </a>
             <a href="#products" style={{ color: 'var(--text-body)', textDecoration: 'none' }}>
               Hardware Store

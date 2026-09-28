@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma, listScopedRules } from '@smartpump/database';
+import { prisma, listScopedRules } from '@/lib/server/database';
 import { authenticateRequest } from '@/middleware/auth-guard';
 import { verifyHardwareOwnership } from '@/middleware/ownership-guard';
-import { AutomationRuleSchema } from '@smartpump/validation';
+import { AutomationRuleSchema } from '@/lib/server/validation';
 
 interface RouteParams {
   params: Promise<{ id: string }>;

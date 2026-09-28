@@ -162,7 +162,15 @@ class ApiClient {
       } catch (e) {
         lastError = e;
         if (e is DioException && e.response != null) {
-          // Received valid HTTP response from server (e.g. 400, 401, 409), server is reached!
+          final sc = e.response?.statusCode;
+          final data = e.response?.data;
+          final isHtml = (data is String && data.toLowerCase().contains('<!doctype html'));
+          // If candidate returns 404 or web-server error HTML, this candidate endpoint is missing.
+          // Continue to the next candidate so we don't block the user.
+          if (sc == 404 || sc == 502 || sc == 503 || sc == 504 || isHtml) {
+            continue;
+          }
+          // Valid API response received (e.g. 400, 401, 409)
           _workingUrl = candidate;
           dio.options.baseUrl = candidate;
           rethrow;
@@ -205,6 +213,12 @@ class ApiClient {
       } catch (e) {
         lastError = e;
         if (e is DioException && e.response != null) {
+          final sc = e.response?.statusCode;
+          final data = e.response?.data;
+          final isHtml = (data is String && data.toLowerCase().contains('<!doctype html'));
+          if (sc == 404 || sc == 502 || sc == 503 || sc == 504 || isHtml) {
+            continue;
+          }
           _workingUrl = candidate;
           dio.options.baseUrl = candidate;
           rethrow;

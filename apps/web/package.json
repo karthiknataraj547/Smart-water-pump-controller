@@ -12,16 +12,12 @@
     "pm2:restart": "pm2 restart ecosystem.config.js"
   },
   "dependencies": {
-    "@smartpump/auth": "*",
-    "@smartpump/database": "*",
-    "@smartpump/mqtt": "*",
-    "@smartpump/shared": "*",
-    "@smartpump/validation": "*",
-    "ioredis": "^5.4.2",
+    "jose": "^5.9.6",
+    "lucide-react": "^0.468.0",
     "next": "^15.5.26",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

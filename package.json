@@ -18,7 +18,9 @@
     "lint": "npm run lint --workspaces",
     "test": "jest",
     "docker:up": "docker compose -f infrastructure/docker-compose.yml up -d",
-    "docker:down": "docker compose -f infrastructure/docker-compose.yml down"
+    "docker:down": "docker compose -f infrastructure/docker-compose.yml down",
+    "update:web-apk": "node scripts/sync-apk-to-web.js",
+    "build:apk": "cd apps/mobile && flutter build apk --release --split-per-abi && node ../../scripts/sync-apk-to-web.js"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
