@@ -138,6 +138,9 @@ void updateBleStatus(const char* status) {
     }
 }
 
+// Deferred flag so Wi-Fi connection runs in main loop() without blocking BLE GATT thread (prevents Android GATT 133 error)
+volatile bool pendingWifiConnect = false;
+
 // BLE Characteristic Callbacks for Wi-Fi Provisioning
 class WifiProvCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
@@ -168,45 +171,13 @@ class WifiProvCallbacks : public BLECharacteristicCallbacks {
 
                     updateBleStatus("CONNECTING_WIFI");
 
-                    // Attempt connection to Wi-Fi router
-                    WiFi.disconnect(true);
-                    WiFi.mode(WIFI_STA);
-                    isWifiConnecting = true;
-                    wifiConnectStartTime = millis();
-                    WiFi.begin(wifiSsid, wifiPassword);
-
-                    int timeout = 0;
-                    bool provToggle = false;
-                    while (WiFi.status() != WL_CONNECTED && timeout < 150) {
-                        // Flash faster while connecting (toggles every 100ms)
-                        provToggle = !provToggle;
-                        writeStatusLed(provToggle);
-                        delay(100);
-                        if (timeout % 10 == 0) Serial.print(".");
-                        timeout++;
-                    }
-                    isWifiConnecting = false;
-
-                    if (WiFi.status() == WL_CONNECTED) {
-                        writeStatusLed(true); // Constant while connected
-                        Serial.println("\n[WiFi] Connected successfully. IP: " + WiFi.localIP().toString());
-                        updateBleStatus("WIFI_CONNECTED");
-                        delay(300);
-
-                        updateBleStatus("CONNECTING_MQTT");
-                        // Connect to MQTT Broker
-                        if (connectMqtt()) {
-                            updateBleStatus("PROVISIONED");
-                            // Exit pairing mode
-                            isBleProvisioningMode = false;
-                        } else {
-                            updateBleStatus("PROVISIONED"); // Connected to Wi-Fi, MQTT will retry in loop
-                        }
-                    } else {
-                        Serial.println("\n[WiFi] Failed to connect.");
-                        updateBleStatus("FAILED_INVALID_PASSWORD");
-                    }
+                    // CRITICAL: Hand off connection to main loop()!
+                    // Exiting onWrite immediately allows the BLE stack to send the GATT Write ACK to Android in <5ms.
+                    pendingWifiConnect = true;
+                    Serial.println("[BLE Prov] Credentials saved. Queued connection in main loop.");
                 }
+            } else {
+                Serial.printf("[BLE Prov] JSON parse error: %s\n", err.c_str());
             }
         }
     }
@@ -275,10 +246,10 @@ void startBleProvisioning() {
 
     BLEService* pService = pBleServer->createService(BLE_SERVICE_UUID);
 
-    // Characteristic: Wi-Fi Provisioning
+    // Characteristic: Wi-Fi Provisioning (Support both WRITE and WRITE_NR)
     BLECharacteristic* pWifiChar = pService->createCharacteristic(
         BLE_CHAR_WIFI_PROV_UUID,
-        BLECharacteristic::PROPERTY_WRITE
+        BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
     );
     pWifiChar->setCallbacks(new WifiProvCallbacks());
 
@@ -515,10 +486,9 @@ void updateStatusLed() {
 }
 
 // Hardware Reset Button Handler (Inbuilt BOOT GPIO 0 and External Reset GPIO 4)
-// Multi-Tier Press Detection:
-// - Short Press (< 3s): Soft reset / controller reboot (safely isolates relay, blinks LED, ESP.restart())
-// - Medium Press (3 - 7s): Trigger Bluetooth BLE Provisioning / Pairing Mode
-// - Long Press (>= 7s): Full Factory Reset (wipes saved NVS Wi-Fi credentials & tank configuration, flashes LED 5x, ESP.restart())
+// Behaviors:
+// - Short Press (< 3s): Soft reboot / safe controller restart (isolates relay, double LED blink, ESP.restart())
+// - Long Press (>= 5s): Erases saved Wi-Fi credentials from device NVS, disconnects Wi-Fi, flashes LED 5x, launches BLE pairing mode
 void checkHardwareResetButton() {
     bool bootPressed = (digitalRead(BOOT_BUTTON_PIN) == LOW);
     bool extPressed = (digitalRead(EXTERNAL_RESET_PIN) == LOW);
@@ -528,40 +498,50 @@ void checkHardwareResetButton() {
         bool ledToggle = false;
         unsigned long lastFeedbackToggle = 0;
 
-        Serial.println("[Button] Hardware reset button press detected. Evaluating hold duration...");
+        Serial.println("[Button] Reset button pressed. Monitoring hold duration...");
 
-        // Monitor button hold while keeping visual feedback active
+        // Monitor button hold while providing real-time visual feedback
         while (digitalRead(BOOT_BUTTON_PIN) == LOW || digitalRead(EXTERNAL_RESET_PIN) == LOW) {
             unsigned long duration = millis() - pressStart;
 
-            if (duration >= 7000) {
-                // Tier 3 visual cue: Ultra-fast 50ms strobe (Factory Reset armed!)
+            if (duration >= 5000) {
+                // Visual cue: Ultra-fast 50ms strobe indicates 5-second Wi-Fi Erase threshold has been reached!
                 if (millis() - lastFeedbackToggle >= 50) {
                     lastFeedbackToggle = millis();
                     ledToggle = !ledToggle;
                     writeStatusLed(ledToggle);
                 }
-            } else if (duration >= 3000) {
-                // Tier 2 visual cue: 150ms medium flash (BLE Provisioning armed!)
-                if (millis() - lastFeedbackToggle >= 150) {
-                    lastFeedbackToggle = millis();
-                    ledToggle = !ledToggle;
-                    writeStatusLed(ledToggle);
-                }
+            } else {
+                // Steady ON while holding under 5 seconds
+                writeStatusLed(true);
             }
             delay(10);
         }
 
         unsigned long totalPressTime = millis() - pressStart;
 
-        if (totalPressTime >= 7000) {
-            // === TIER 3: FULL FACTORY RESET (Held >= 7 seconds) ===
-            Serial.println("\n[Button] LONG PRESS (>=7s) -> EXECUTING FULL FACTORY RESET!");
-            // 1. Isolate relay immediately
+        if (totalPressTime >= 5000) {
+            // === 5 SECONDS HOLD: ERASE SAVED WI-FI CREDENTIALS ===
+            Serial.println("\n[Button] 5-SECOND HOLD DETECTED -> ERASING SAVED WI-FI CREDENTIALS!");
+            // 1. Isolate relay
             digitalWrite(RELAY_PIN, LOW);
             relayActive = false;
 
-            // 2. Visual feedback: 5 rapid confirmation strobe pulses
+            // 2. Erase saved Wi-Fi credentials from NVS
+            prefs.begin("smartpump", false);
+            prefs.remove("wifi_ssid");
+            prefs.remove("wifi_pass");
+            prefs.end();
+
+            // 3. Clear in-memory credentials
+            wifiSsid[0] = '\0';
+            wifiPassword[0] = '\0';
+
+            // 4. Disconnect Wi-Fi radio
+            WiFi.disconnect(true);
+            isWifiConnecting = false;
+
+            // 5. 5 rapid confirmation strobe flashes
             for (int i = 0; i < 5; i++) {
                 writeStatusLed(true);
                 delay(80);
@@ -569,26 +549,14 @@ void checkHardwareResetButton() {
                 delay(80);
             }
 
-            // 3. Clear all NVS preferences (Wi-Fi, User ID, Tank Config)
-            prefs.begin("smartpump", false);
-            prefs.clear();
-            prefs.end();
-
-            Serial.println("[Button] NVS cleared. Restarting ESP32 into factory state...\n");
-            delay(200);
-            ESP.restart();
-        } else if (totalPressTime >= 3000) {
-            // === TIER 2: BLE PROVISIONING MODE (Held 3 to 7 seconds) ===
-            Serial.println("\n[Button] MEDIUM PRESS (3-7s) -> Launching Bluetooth Provisioning Mode!");
+            Serial.println("[Button] Wi-Fi credentials erased. Entering Bluetooth Provisioning Mode for new pairing...\n");
             startBleProvisioning();
         } else if (totalPressTime >= 80) {
-            // === TIER 1: INBUILT HARDWARE RESET / REBOOT (Short press < 3 seconds) ===
-            Serial.println("\n[Button] SHORT PRESS (<3s) -> INBUILT HARDWARE RESET / CONTROLLER REBOOT!");
-            // 1. Isolate relay
+            // === SHORT PRESS (< 3s): SOFT CONTROLLER REBOOT ===
+            Serial.println("\n[Button] SHORT PRESS (<3s) -> CONTROLLER SOFT RESET / REBOOT!");
             digitalWrite(RELAY_PIN, LOW);
             relayActive = false;
 
-            // 2. LED feedback: Double blink before restarting
             writeStatusLed(false);
             delay(100);
             writeStatusLed(true);
@@ -681,14 +649,36 @@ void loop() {
     // Check hardware reset buttons (Inbuilt BOOT GPIO 0 and External GPIO 4)
     checkHardwareResetButton();
 
+    // Deferred Wi-Fi connection from BLE provisioning
+    if (pendingWifiConnect) {
+        pendingWifiConnect = false;
+        Serial.printf("[Provisioning] Connecting to Wi-Fi SSID: '%s'...\n", wifiSsid);
+        updateBleStatus("CONNECTING_WIFI");
+        WiFi.disconnect(false);
+        WiFi.mode(WIFI_STA);
+        isWifiConnecting = true;
+        wifiConnectStartTime = millis();
+        WiFi.begin(wifiSsid, wifiPassword);
+    }
+
     // Check if Wi-Fi connection has resolved
     if (isWifiConnecting) {
         if (WiFi.status() == WL_CONNECTED) {
             isWifiConnecting = false;
             Serial.println("\n[WiFi] Connected successfully. IP: " + WiFi.localIP().toString());
+            updateBleStatus("WIFI_CONNECTED");
+            delay(300);
+            updateBleStatus("CONNECTING_MQTT");
+            if (connectMqtt()) {
+                updateBleStatus("PROVISIONED");
+                isBleProvisioningMode = false;
+            } else {
+                updateBleStatus("PROVISIONED");
+            }
         } else if (millis() - wifiConnectStartTime > 20000) {
             isWifiConnecting = false;
             Serial.println("\n[WiFi] Connection attempt timed out.");
+            updateBleStatus("FAILED_INVALID_PASSWORD");
         }
     } else if (WiFi.status() != WL_CONNECTED && strlen(wifiSsid) > 0 && !isBleProvisioningMode) {
         static unsigned long lastWifiRetry = 0;

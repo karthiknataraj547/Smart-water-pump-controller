@@ -227,14 +227,22 @@ class BleProvisioningService {
     required String password,
     required String userId,
     required Function(ConnectionStage stage, String message) onProgress,
+    Future<bool> Function()? checkCloudOnline,
   }) async {
-    onProgress(ConnectionStage.transmittingWifi, 'Connecting to Smart Controller...');
+    onProgress(ConnectionStage.transmittingWifi, 'Connecting to Smart Controller over Bluetooth...');
 
     if (node.device != null && !kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
-        await node.device!.connect(timeout: const Duration(seconds: 10));
-        onProgress(ConnectionStage.transmittingWifi, 'Discovering Controller Provisioning Service...');
+        if (!node.device!.isConnected) {
+          await node.device!.connect(timeout: const Duration(seconds: 10));
+        }
 
+        // Request larger MTU on Android to prevent payload truncation / GATT 133
+        try {
+          await node.device!.requestMtu(256);
+        } catch (_) {}
+
+        onProgress(ConnectionStage.transmittingWifi, 'Discovering Controller Provisioning Service...');
         final services = await node.device!.discoverServices();
         final provService = services.firstWhere(
           (s) => s.uuid.toString().toLowerCase() == serviceUuid.toLowerCase(),
@@ -246,6 +254,31 @@ class BleProvisioningService {
           orElse: () => throw Exception('Wi-Fi Provisioning Characteristic missing.'),
         );
 
+        // Find status characteristic and subscribe to notifications
+        BluetoothCharacteristic? statusChar;
+        final statusChars = provService.characteristics.where(
+          (c) => c.uuid.toString().toLowerCase() == charStatusUuid.toLowerCase(),
+        );
+
+        String latestBleStatus = '';
+        StreamSubscription? statusSub;
+
+        if (statusChars.isNotEmpty) {
+          statusChar = statusChars.first;
+          try {
+            await statusChar.setNotifyValue(true);
+            statusSub = statusChar.lastValueStream.listen((val) {
+              if (val.isNotEmpty) {
+                final s = utf8.decode(val, allowMalformed: true).trim();
+                if (s.isNotEmpty) {
+                  latestBleStatus = s;
+                  debugPrint('[BLE Status Event] $latestBleStatus');
+                }
+              }
+            });
+          } catch (_) {}
+        }
+
         onProgress(ConnectionStage.transmittingWifi, 'Pushing encrypted Wi-Fi configuration to controller...');
         final payload = jsonEncode({
           'ssid': ssid,
@@ -254,25 +287,83 @@ class BleProvisioningService {
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         });
 
-        await wifiChar.write(utf8.encode(payload), withoutResponse: false);
-
-        onProgress(ConnectionStage.routerHandshake, 'Smart Controller connecting to 2.4GHz Wi-Fi router...');
-        await Future.delayed(const Duration(milliseconds: 1800));
-
-        // Check status characteristic if available
-        final statusChars = provService.characteristics.where(
-          (c) => c.uuid.toString().toLowerCase() == charStatusUuid.toLowerCase(),
-        );
-        if (statusChars.isNotEmpty) {
-          final statusVal = await statusChars.first.read();
-          final statusStr = utf8.decode(statusVal);
-          if (statusStr.contains('FAILED')) {
-            throw Exception('Smart Controller failed to associate with Wi-Fi: $statusStr');
+        // Safe Write Attempt: Try write with response, with fallback to writeWithoutResponse
+        final bytes = utf8.encode(payload);
+        try {
+          await wifiChar.write(bytes, withoutResponse: false);
+        } catch (writeErr) {
+          debugPrint('[BLE] Write with response caught: $writeErr. Retrying withoutResponse...');
+          try {
+            await wifiChar.write(bytes, withoutResponse: true);
+          } catch (fbErr) {
+            debugPrint('[BLE] Fallback write also caught: $fbErr');
+            // Do not immediately throw; proceed to verification loop because
+            // single-radio ESP32 often switches radio immediately upon receiving credentials.
           }
         }
 
-        onProgress(ConnectionStage.cloudVerification, 'Verifying Cloud MQTT connection & claiming controller...');
-        await Future.delayed(const Duration(milliseconds: 1200));
+        // =====================================================================
+        // VERIFICATION STAGE: ONLY WHEN WI-FI IS CONNECTED SHOW IT'S CONNECTED!
+        // =====================================================================
+        onProgress(ConnectionStage.routerHandshake, 'Verifying Smart Controller connection to "$ssid"...');
+
+        bool isWifiConfirmedConnected = false;
+        final deadline = DateTime.now().add(const Duration(seconds: 22));
+
+        while (DateTime.now().isBefore(deadline)) {
+          await Future.delayed(const Duration(milliseconds: 1200));
+
+          // 1. Check BLE live status notification
+          if (latestBleStatus.contains('WIFI_CONNECTED') || latestBleStatus.contains('PROVISIONED')) {
+            isWifiConfirmedConnected = true;
+            break;
+          }
+          if (latestBleStatus.contains('FAILED_INVALID_PASSWORD')) {
+            await statusSub?.cancel();
+            throw Exception('Authentication failed: Invalid Wi-Fi password or router rejected connection.');
+          }
+
+          // 2. Actively poll status characteristic if BLE link is still alive
+          if (statusChar != null && (node.device?.isConnected ?? false)) {
+            try {
+              final statusVal = await statusChar.read();
+              final statusStr = utf8.decode(statusVal, allowMalformed: true).trim();
+              if (statusStr.contains('WIFI_CONNECTED') || statusStr.contains('PROVISIONED')) {
+                isWifiConfirmedConnected = true;
+                break;
+              }
+              if (statusStr.contains('FAILED_INVALID_PASSWORD')) {
+                await statusSub?.cancel();
+                throw Exception('Authentication failed: Invalid Wi-Fi password or router rejected connection.');
+              }
+            } catch (_) {
+              // BLE link may disconnect as ESP32 prioritizes 2.4 GHz Wi-Fi Station mode
+            }
+          }
+
+          // 3. Check Cloud Backend API (device heartbeat received)
+          if (checkCloudOnline != null) {
+            try {
+              final isOnlineOnCloud = await checkCloudOnline();
+              if (isOnlineOnCloud) {
+                debugPrint('[BLE Provisioning] Cloud API confirmed device is ONLINE!');
+                isWifiConfirmedConnected = true;
+                break;
+              }
+            } catch (_) {}
+          }
+        }
+
+        await statusSub?.cancel();
+
+        if (!isWifiConfirmedConnected) {
+          throw Exception(
+            'Smart Controller failed to associate with "$ssid". Please check Wi-Fi password, verify 2.4 GHz router frequency, and try again.',
+          );
+        }
+
+        onProgress(ConnectionStage.cloudVerification, 'Wi-Fi verified! Cloud connection established...');
+        await Future.delayed(const Duration(milliseconds: 800));
 
         onProgress(ConnectionStage.connected, 'Smart Controller successfully connected & verified!');
         return;
@@ -296,25 +387,32 @@ class BleProvisioningService {
   }) async {
     if (node.device != null && !kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
-        final services = await node.device!.discoverServices();
-        final provService = services.firstWhere(
-          (s) => s.uuid.toString().toLowerCase() == serviceUuid.toLowerCase(),
-        );
-        final tankChars = provService.characteristics.where(
-          (c) => c.uuid.toString().toLowerCase() == charTankConfigUuid.toLowerCase(),
-        );
-        if (tankChars.isNotEmpty) {
-          final payload = jsonEncode({
-            'tankType': tankType,
-            'capacityL': tankCapacityLiters,
-            'depthCm': tankDepthCm,
-            'sensorOffsetCm': sensorOffsetCm,
-            'motorHp': motorHp,
-          });
-          await tankChars.first.write(utf8.encode(payload), withoutResponse: false);
+        if (!node.device!.isConnected) {
+          try {
+            await node.device!.connect(timeout: const Duration(seconds: 4));
+          } catch (_) {}
+        }
+        if (node.device!.isConnected) {
+          final services = await node.device!.discoverServices();
+          final provService = services.firstWhere(
+            (s) => s.uuid.toString().toLowerCase() == serviceUuid.toLowerCase(),
+          );
+          final tankChars = provService.characteristics.where(
+            (c) => c.uuid.toString().toLowerCase() == charTankConfigUuid.toLowerCase(),
+          );
+          if (tankChars.isNotEmpty) {
+            final payload = jsonEncode({
+              'tankType': tankType,
+              'capacityL': tankCapacityLiters,
+              'depthCm': tankDepthCm,
+              'sensorOffsetCm': sensorOffsetCm,
+              'motorHp': motorHp,
+            });
+            await tankChars.first.write(utf8.encode(payload), withoutResponse: false);
+          }
         }
       } catch (e) {
-        debugPrint('Tank config BLE write error: $e');
+        debugPrint('Tank config BLE write notice (persisting via Cloud): $e');
       }
     }
   }

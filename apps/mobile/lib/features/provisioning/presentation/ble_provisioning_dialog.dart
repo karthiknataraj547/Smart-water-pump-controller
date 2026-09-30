@@ -6,6 +6,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/auth/auth_provider.dart';
+import '../../../core/pump/pump_provider.dart';
 import '../../../core/ble/ble_provisioning_service.dart';
 
 class BleProvisioningDialog extends ConsumerStatefulWidget {
@@ -180,6 +181,14 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
         ssid: ssid,
         password: password,
         userId: userId,
+        checkCloudOnline: () async {
+          try {
+            await ref.read(pumpProvider.notifier).fetchHardwareState();
+            return ref.read(pumpProvider).isOnline;
+          } catch (_) {
+            return false;
+          }
+        },
         onProgress: (stage, message) {
           if (mounted) {
             setState(() {
