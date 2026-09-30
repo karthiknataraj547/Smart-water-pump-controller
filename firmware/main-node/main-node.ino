@@ -49,12 +49,16 @@ unsigned long lastHeartbeat = 0;
 const unsigned long HEARTBEAT_INTERVAL = 5000;
 
 // Device Identity & Security
-char serialNumber[32] = "SP-ESP32-B244";
+char serialNumber[32] = "SP-CTRL-B244";
 char registeredUserId[64] = "";
 char wifiSsid[64] = "";
 char wifiPassword[64] = "";
 char mqttServer[64] = "192.168.1.100";
 int mqttPort = 1883;
+
+// Wi-Fi Connection & Status LED State
+bool isWifiConnecting = false;
+unsigned long wifiConnectStartTime = 0;
 
 // Tank Configuration (Persistent in NVS)
 char tankType[64] = "Overhead Plastic (Sintex)";
@@ -144,16 +148,22 @@ class WifiProvCallbacks : public BLECharacteristicCallbacks {
                     // Attempt connection to Wi-Fi router
                     WiFi.disconnect(true);
                     WiFi.mode(WIFI_STA);
+                    isWifiConnecting = true;
+                    wifiConnectStartTime = millis();
                     WiFi.begin(wifiSsid, wifiPassword);
 
                     int timeout = 0;
-                    while (WiFi.status() != WL_CONNECTED && timeout < 25) {
-                        delay(500);
-                        Serial.print(".");
+                    while (WiFi.status() != WL_CONNECTED && timeout < 150) {
+                        // Flash faster while connecting (toggles every 100ms)
+                        digitalWrite(STATUS_LED_BLUE, !digitalRead(STATUS_LED_BLUE));
+                        delay(100);
+                        if (timeout % 10 == 0) Serial.print(".");
                         timeout++;
                     }
+                    isWifiConnecting = false;
 
                     if (WiFi.status() == WL_CONNECTED) {
+                        digitalWrite(STATUS_LED_BLUE, HIGH); // Constant while connected
                         Serial.println("\n[WiFi] Connected successfully. IP: " + WiFi.localIP().toString());
                         updateBleStatus("WIFI_CONNECTED");
                         delay(300);
@@ -224,8 +234,8 @@ void startBleProvisioning() {
     uint8_t mac[6];
     WiFi.macAddress(mac);
     char bleDeviceName[32];
-    snprintf(bleDeviceName, sizeof(bleDeviceName), "SmartPump-Gateway-%02X%02X", mac[4], mac[5]);
-    snprintf(serialNumber, sizeof(serialNumber), "SP-ESP32-%02X%02X", mac[4], mac[5]);
+    snprintf(bleDeviceName, sizeof(bleDeviceName), "Smart Pump Controller");
+    snprintf(serialNumber, sizeof(serialNumber), "SP-CTRL-%02X%02X", mac[4], mac[5]);
 
     BLEDevice::init(bleDeviceName);
     pBleServer = BLEDevice::createServer();
@@ -275,7 +285,7 @@ bool connectMqtt() {
     const char* uid = (strlen(registeredUserId) > 0) ? registeredUserId : "unclaimed";
 
     char clientId[64];
-    snprintf(clientId, sizeof(clientId), "ESP32_%s", serialNumber);
+    snprintf(clientId, sizeof(clientId), "SP_%s", serialNumber);
 
     char lwtTopic[128];
     snprintf(lwtTopic, sizeof(lwtTopic), "users/%s/devices/%s/status", uid, serialNumber);
@@ -393,6 +403,30 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     mqttClient.publish(ackTopic, ackBuffer, true);
 }
 
+// Status LED behavior:
+// 1. Wi-Fi Connected -> Constant ON (Solid HIGH)
+// 2. Wi-Fi Connecting -> Flash Faster (100ms rapid flash)
+// 3. Wi-Fi Not Connected -> Blink Once periodically (120ms pulse every 2000ms)
+void updateStatusLed() {
+    static unsigned long lastToggle = 0;
+    unsigned long now = millis();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        digitalWrite(STATUS_LED_BLUE, HIGH); // Constant while connected
+    } else if (isWifiConnecting) {
+        // Flash faster while connecting (toggles every 100ms)
+        if (now - lastToggle >= 100) {
+            lastToggle = now;
+            digitalWrite(STATUS_LED_BLUE, !digitalRead(STATUS_LED_BLUE));
+        }
+    } else {
+        // Blink once when not connected:
+        // In a 2000ms cycle: ON for 120ms, then OFF for 1880ms
+        unsigned long cycle = now % 2000;
+        digitalWrite(STATUS_LED_BLUE, (cycle < 120) ? HIGH : LOW);
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     pinMode(RELAY_PIN, OUTPUT);
@@ -430,6 +464,8 @@ void setup() {
     } else {
         Serial.printf("[Boot] Connecting to saved Wi-Fi: %s (User: %s)\n", wifiSsid, registeredUserId);
         WiFi.mode(WIFI_STA);
+        isWifiConnecting = true;
+        wifiConnectStartTime = millis();
         WiFi.begin(wifiSsid, wifiPassword);
     }
 
@@ -457,16 +493,28 @@ void loop() {
         }
     }
 
-    // Pulse Status LED if in BLE Provisioning Mode
-    if (isBleProvisioningMode) {
-        static unsigned long lastBlink = 0;
-        if (millis() - lastBlink >= 300) {
-            lastBlink = millis();
-            digitalWrite(STATUS_LED_BLUE, !digitalRead(STATUS_LED_BLUE));
+    // Check if Wi-Fi connection has resolved
+    if (isWifiConnecting) {
+        if (WiFi.status() == WL_CONNECTED) {
+            isWifiConnecting = false;
+            Serial.println("\n[WiFi] Connected successfully. IP: " + WiFi.localIP().toString());
+        } else if (millis() - wifiConnectStartTime > 20000) {
+            isWifiConnecting = false;
+            Serial.println("\n[WiFi] Connection attempt timed out.");
         }
-    } else {
-        digitalWrite(STATUS_LED_BLUE, (WiFi.status() == WL_CONNECTED) ? HIGH : LOW);
+    } else if (WiFi.status() != WL_CONNECTED && strlen(wifiSsid) > 0 && !isBleProvisioningMode) {
+        static unsigned long lastWifiRetry = 0;
+        if (millis() - lastWifiRetry > 15000) {
+            lastWifiRetry = millis();
+            isWifiConnecting = true;
+            wifiConnectStartTime = millis();
+            Serial.println("[WiFi] Disconnected. Reconnecting...");
+            WiFi.reconnect();
+        }
     }
+
+    // Status LED: blink once when not connected, flash faster when connecting, constant when connected
+    updateStatusLed();
 
     // Manage MQTT Connection
     if (!isBleProvisioningMode && WiFi.status() == WL_CONNECTED) {

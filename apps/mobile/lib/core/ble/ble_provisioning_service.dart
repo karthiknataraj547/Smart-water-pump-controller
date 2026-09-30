@@ -167,40 +167,39 @@ class BleProvisioningService {
                 : r.advertisementData.advName;
             final mac = r.device.remoteId.str;
 
-            // Check if device matches SmartPump signature or service UUID
+            // Check if device matches SmartPump signature, controller name, or service UUID
             final hasService = r.advertisementData.serviceUuids.any(
               (u) => u.toString().toLowerCase() == serviceUuid.toLowerCase(),
             );
             final nameLower = rawName.toLowerCase();
             final isSmartPumpCandidate = hasService ||
+                nameLower.contains('smart pump') ||
                 nameLower.contains('smartpump') ||
-                nameLower.contains('sp-') ||
+                nameLower.contains('controller') ||
                 nameLower.contains('pump') ||
                 nameLower.contains('hydro') ||
-                nameLower.contains('water') ||
-                nameLower.contains('controller') ||
+                nameLower.contains('sp-') ||
                 nameLower.contains('esp');
 
-            final cleanName = sanitizeDeviceName(rawName, mac);
+            // Strictly filter: Only show Smart Pump Controller devices
+            if (!isSmartPumpCandidate) {
+              continue;
+            }
 
             discoveredMap[mac] = BleDiscoveredNode(
               id: mac,
-              name: cleanName,
+              name: 'Smart Pump Controller',
               macAddress: mac,
               rssi: r.rssi,
               device: r.device,
-              isSmartPumpCandidate: isSmartPumpCandidate,
+              isSmartPumpCandidate: true,
               advertisedServices: r.advertisementData.serviceUuids.map((u) => u.toString()).toList(),
             );
           }
 
-          // Sort: SmartPump candidates first, then by signal strength (RSSI descending)
+          // Sort by signal strength (RSSI descending)
           final sortedList = discoveredMap.values.toList()
-            ..sort((a, b) {
-              if (a.isSmartPumpCandidate && !b.isSmartPumpCandidate) return -1;
-              if (!a.isSmartPumpCandidate && b.isSmartPumpCandidate) return 1;
-              return b.rssi.compareTo(a.rssi);
-            });
+            ..sort((a, b) => b.rssi.compareTo(a.rssi));
 
           yield sortedList;
         }
@@ -282,17 +281,7 @@ class BleProvisioningService {
         rethrow;
       }
     } else {
-      // In environment where real BLE radio is unavailable (e.g. emulator or dev workstation)
-      onProgress(ConnectionStage.transmittingWifi, 'Establishing encrypted Bluetooth link to ${node.name}...');
-      await Future.delayed(const Duration(milliseconds: 1200));
-
-      onProgress(ConnectionStage.routerHandshake, 'Smart Controller connected to "$ssid" (DHCP IP: 192.168.1.140)...');
-      await Future.delayed(const Duration(milliseconds: 1400));
-
-      onProgress(ConnectionStage.cloudVerification, 'Binding controller serial ${node.name} to registered User ID: $userId...');
-      await Future.delayed(const Duration(milliseconds: 1200));
-
-      onProgress(ConnectionStage.connected, 'Smart Controller verified & claimed to account!');
+      throw Exception('Bluetooth hardware device handle is unavailable. Please scan and select a valid Smart Pump Controller.');
     }
   }
 

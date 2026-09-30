@@ -113,14 +113,13 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
       (nodes) {
         if (mounted) {
           setState(() {
-            _discoveredDevices = nodes;
+            // Strictly only show devices named Smart Pump Controller
+            _discoveredDevices = nodes
+                .where((n) => n.isSmartPumpCandidate && n.name == 'Smart Pump Controller')
+                .toList();
             // Auto-select first matching Smart Controller if not selected
-            if (_selectedNode == null && nodes.isNotEmpty) {
-              final smartNode = nodes.firstWhere(
-                (n) => n.isSmartPumpCandidate,
-                orElse: () => nodes.first,
-              );
-              _selectedNode = smartNode;
+            if (_selectedNode == null && _discoveredDevices.isNotEmpty) {
+              _selectedNode = _discoveredDevices.first;
             }
           });
         }
@@ -137,25 +136,6 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
       if (mounted) {
         setState(() => _isScanning = false);
       }
-    });
-  }
-
-  /// Simulation trigger for testing without hardware
-  void _simulateHardwareInPairingMode() {
-    setState(() {
-      const simMac = '24:6F:28:B2:44:90';
-      const simNode = BleDiscoveredNode(
-        id: simMac,
-        name: 'Smart Controller Hub (4490)',
-        macAddress: simMac,
-        rssi: -58,
-        isSmartPumpCandidate: true,
-      );
-      if (!_discoveredDevices.any((d) => d.macAddress == simMac)) {
-        _discoveredDevices.insert(0, simNode);
-      }
-      _selectedNode = simNode;
-      _isScanning = false;
     });
   }
 
@@ -612,7 +592,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
                     '2', 'Press and hold the Pairing button for 3 seconds.', textSec),
                 const SizedBox(height: 8),
                 _buildInstructionRow(
-                    '3', 'Status LED will pulse Blue to confirm ready state.', textSec),
+                    '3', 'Status LED blinks once while awaiting connection.', textSec),
                 const SizedBox(height: 8),
                 _buildInstructionRow(
                     '4', 'Keep phone within 5 meters of the controller.', textSec),
@@ -650,28 +630,15 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
               ),
             ),
           ),
-          const SizedBox(height: 8),
-
-          // Simulator option for test environments
-          TextButton(
-            onPressed: _simulateHardwareInPairingMode,
-            child: Text(
-              'Simulate Controller Hardware Beacon (Developer Mode)',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11,
-                color: textSec,
-                decoration: TextDecoration.underline,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
         ],
       );
     }
 
-    // Devices Found
-    final smartNodes = _discoveredDevices.where((d) => d.isSmartPumpCandidate).toList();
-    final otherNodes = _discoveredDevices.where((d) => !d.isSmartPumpCandidate).toList();
+    // Devices Found (strictly Smart Pump Controller devices)
+    final smartNodes = _discoveredDevices
+        .where((d) => d.isSmartPumpCandidate && d.name == 'Smart Pump Controller')
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -682,7 +649,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
             Row(
               children: [
                 Text(
-                  'Nearby Controllers (${_discoveredDevices.length})',
+                  'Smart Pump Controller (${smartNodes.length})',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
@@ -715,7 +682,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
         ),
         const SizedBox(height: 2),
         Text(
-          'Select your controller to configure Wi-Fi credentials:',
+          'Select your Smart Pump Controller to configure Wi-Fi credentials:',
           style: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
         ),
         const SizedBox(height: 12),
@@ -724,37 +691,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
           child: ListView(
             physics: const BouncingScrollPhysics(),
             children: [
-              if (smartNodes.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    'SMART CONTROLLERS',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w800,
-                      color: primaryAccent,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                ),
-                ...smartNodes.map((node) => _buildDeviceCard(node, isDark, textPrim, textSec, borderCol, bgElevated, primaryAccent)),
-              ],
-
-              if (otherNodes.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.only(top: 14, bottom: 6),
-                  child: Text(
-                    'OTHER DETECTED BLUETOOTH DEVICES',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w800,
-                      color: textSec,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                ),
-                ...otherNodes.map((node) => _buildDeviceCard(node, isDark, textPrim, textSec, borderCol, bgElevated, primaryAccent)),
-              ],
+              ...smartNodes.map((node) => _buildDeviceCard(node, isDark, textPrim, textSec, borderCol, bgElevated, primaryAccent)),
             ],
           ),
         ),
@@ -774,7 +711,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
               disabledBackgroundColor: borderCol,
             ),
             child: Text(
-              _selectedNode != null ? 'Continue to Wi-Fi Setup →' : 'Select a Device Above',
+              _selectedNode != null ? 'Continue to Wi-Fi Setup →' : 'Select Smart Pump Controller',
               style: GoogleFonts.plusJakartaSans(fontSize: 14.5, fontWeight: FontWeight.w700),
             ),
           ),
