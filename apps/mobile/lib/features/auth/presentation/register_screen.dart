@@ -165,15 +165,22 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         },
                       ),
                       ActionChip(
-                        label: const Text('192.168.31.55:3000 (Local Wi-Fi)', style: TextStyle(fontSize: 11)),
+                        avatar: const Icon(Icons.wifi_rounded, size: 16),
+                        label: const Text('192.168.31.53:3001 (Local Server)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                         onPressed: () {
-                          serverController.text = 'http://192.168.31.55:3000';
+                          serverController.text = 'http://192.168.31.53:3001';
                         },
                       ),
                       ActionChip(
-                        label: const Text('localhost:3000 (USB)', style: TextStyle(fontSize: 11)),
+                        label: const Text('192.168.31.53:3000 (Backend API)', style: TextStyle(fontSize: 11)),
                         onPressed: () {
-                          serverController.text = 'http://localhost:3000';
+                          serverController.text = 'http://192.168.31.53:3000';
+                        },
+                      ),
+                      ActionChip(
+                        label: const Text('localhost:3001 (USB)', style: TextStyle(fontSize: 11)),
+                        onPressed: () {
+                          serverController.text = 'http://localhost:3001';
                         },
                       ),
                     ],

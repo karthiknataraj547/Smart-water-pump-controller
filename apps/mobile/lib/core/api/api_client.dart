@@ -5,11 +5,17 @@ class ApiClient {
   // Ordered by priority: Production Cloud (Vercel), Local LAN IP (Wi-Fi), USB ADB reverse, Emulator
   static const List<String> defaultCandidates = [
     'https://smart-water-pump-controller.vercel.app',
+    'http://192.168.31.53:3001',
+    'http://192.168.31.53:3000',
     'http://192.168.31.55:3000',
+    'http://192.168.31.55:3001',
     'http://192.168.31.54:3000',
+    'http://localhost:3001',
     'http://localhost:3000',
+    'http://127.0.0.1:3001',
     'http://127.0.0.1:3000',
     'http://10.0.2.2:3000',
+    'http://10.0.2.2:3001',
   ];
 
   static const String defaultBaseUrl = 'https://smart-water-pump-controller.vercel.app';
