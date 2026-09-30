@@ -31,9 +31,30 @@
 
 // Pin Definitions
 #define RELAY_PIN 26
-#define STATUS_LED_BLUE 2
 #define BOOT_BUTTON_PIN 0
 #define DRY_RUN_FLOW_THRESHOLD 1.0 // Liters / minute
+
+// Status LED Pin Definitions
+// Primary LED pin: Use board-defined LED_BUILTIN if available, otherwise GPIO 2
+#if defined(LED_BUILTIN)
+#define STATUS_LED_PRIMARY LED_BUILTIN
+#else
+#define STATUS_LED_PRIMARY 2
+#endif
+
+// Always drive GPIO 2 as secondary so both standard ESP32 and custom boards flash
+#define STATUS_LED_SECONDARY 2
+
+// Active-HIGH setting (true: HIGH = ON; false: LOW = ON)
+#define LED_ACTIVE_HIGH true
+
+void writeStatusLed(bool on) {
+    int level = LED_ACTIVE_HIGH ? (on ? HIGH : LOW) : (on ? LOW : HIGH);
+    digitalWrite(STATUS_LED_PRIMARY, level);
+    if (STATUS_LED_SECONDARY != STATUS_LED_PRIMARY) {
+        digitalWrite(STATUS_LED_SECONDARY, level);
+    }
+}
 
 // BLE GATT Service & Characteristics UUIDs
 #define BLE_SERVICE_UUID           "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -153,9 +174,11 @@ class WifiProvCallbacks : public BLECharacteristicCallbacks {
                     WiFi.begin(wifiSsid, wifiPassword);
 
                     int timeout = 0;
+                    bool provToggle = false;
                     while (WiFi.status() != WL_CONNECTED && timeout < 150) {
                         // Flash faster while connecting (toggles every 100ms)
-                        digitalWrite(STATUS_LED_BLUE, !digitalRead(STATUS_LED_BLUE));
+                        provToggle = !provToggle;
+                        writeStatusLed(provToggle);
                         delay(100);
                         if (timeout % 10 == 0) Serial.print(".");
                         timeout++;
@@ -163,7 +186,7 @@ class WifiProvCallbacks : public BLECharacteristicCallbacks {
                     isWifiConnecting = false;
 
                     if (WiFi.status() == WL_CONNECTED) {
-                        digitalWrite(STATUS_LED_BLUE, HIGH); // Constant while connected
+                        writeStatusLed(true); // Constant while connected
                         Serial.println("\n[WiFi] Connected successfully. IP: " + WiFi.localIP().toString());
                         updateBleStatus("WIFI_CONNECTED");
                         delay(300);
@@ -229,6 +252,13 @@ class TankConfigCallbacks : public BLECharacteristicCallbacks {
 void startBleProvisioning() {
     isBleProvisioningMode = true;
     Serial.println("[BLE] Starting Bluetooth Provisioning Mode...");
+
+    static bool bleInitialized = false;
+    if (bleInitialized) {
+        BLEDevice::startAdvertising();
+        Serial.println("[BLE] Resumed advertising existing BLE service.");
+        return;
+    }
 
     // Generate Device BLE Name with MAC suffix
     uint8_t mac[6];
@@ -405,37 +435,74 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
 // Status LED behavior:
 // 1. Wi-Fi Connected -> Constant ON (Solid HIGH)
-// 2. Wi-Fi Connecting -> Flash Faster (100ms rapid flash)
-// 3. Wi-Fi Not Connected -> Blink Once periodically (120ms pulse every 2000ms)
+// 2. Wi-Fi Connecting -> Flash Faster (120ms rapid toggle: 120ms ON, 120ms OFF)
+// 3. Wi-Fi Not Connected -> Blink Once periodically (250ms pulse every 2000ms)
 void updateStatusLed() {
-    static unsigned long lastToggle = 0;
+    static unsigned long lastFastFlash = 0;
+    static bool fastFlashToggle = false;
+    static String lastStateStr = "";
     unsigned long now = millis();
 
     if (WiFi.status() == WL_CONNECTED) {
-        digitalWrite(STATUS_LED_BLUE, HIGH); // Constant while connected
+        // STATE 1: Wi-Fi Connected -> Constant ON
+        writeStatusLed(true);
+        if (lastStateStr != "CONNECTED") {
+            lastStateStr = "CONNECTED";
+            Serial.println("[LED] State: Wi-Fi Connected (Constant ON)");
+        }
     } else if (isWifiConnecting) {
-        // Flash faster while connecting (toggles every 100ms)
-        if (now - lastToggle >= 100) {
-            lastToggle = now;
-            digitalWrite(STATUS_LED_BLUE, !digitalRead(STATUS_LED_BLUE));
+        // STATE 2: Wi-Fi Connecting -> Flash Faster (120ms toggle)
+        if (now - lastFastFlash >= 120) {
+            lastFastFlash = now;
+            fastFlashToggle = !fastFlashToggle;
+            writeStatusLed(fastFlashToggle);
+        }
+        if (lastStateStr != "CONNECTING") {
+            lastStateStr = "CONNECTING";
+            Serial.println("[LED] State: Wi-Fi Connecting (Fast Flashing)");
         }
     } else {
-        // Blink once when not connected:
-        // In a 2000ms cycle: ON for 120ms, then OFF for 1880ms
+        // STATE 3: Wi-Fi Not Connected -> Blink Once periodically
+        // In a 2000ms period: ON for 250ms, then OFF for 1750ms
         unsigned long cycle = now % 2000;
-        digitalWrite(STATUS_LED_BLUE, (cycle < 120) ? HIGH : LOW);
+        bool ledOn = (cycle < 250);
+        writeStatusLed(ledOn);
+        if (lastStateStr != "DISCONNECTED") {
+            lastStateStr = "DISCONNECTED";
+            Serial.println("[LED] State: Wi-Fi Not Connected (Blink once every 2s)");
+        }
     }
 }
 
 void setup() {
     Serial.begin(115200);
+    delay(200);
+    Serial.println("\n\n========================================");
+    Serial.println("  Smart Water Pump Controller Starting  ");
+    Serial.println("========================================");
+
     pinMode(RELAY_PIN, OUTPUT);
     digitalWrite(RELAY_PIN, LOW); // Safe default OFF
 
-    pinMode(STATUS_LED_BLUE, OUTPUT);
-    digitalWrite(STATUS_LED_BLUE, LOW);
+    // Initialize Status LED pins
+    pinMode(STATUS_LED_PRIMARY, OUTPUT);
+    if (STATUS_LED_SECONDARY != STATUS_LED_PRIMARY) {
+        pinMode(STATUS_LED_SECONDARY, OUTPUT);
+    }
+
+    // Power-on self-test (POST): Double-blink so user visually confirms LED hardware is functional
+    writeStatusLed(true);
+    delay(150);
+    writeStatusLed(false);
+    delay(150);
+    writeStatusLed(true);
+    delay(150);
+    writeStatusLed(false);
 
     pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+
+    // CRITICAL: Initialize WiFi Station mode first so ESP-NOW and BLE radio operate cleanly
+    WiFi.mode(WIFI_STA);
 
     // Load stored Wi-Fi, user ID, and Tank parameters from NVS
     prefs.begin("smartpump", true);
@@ -463,7 +530,6 @@ void setup() {
         startBleProvisioning();
     } else {
         Serial.printf("[Boot] Connecting to saved Wi-Fi: %s (User: %s)\n", wifiSsid, registeredUserId);
-        WiFi.mode(WIFI_STA);
         isWifiConnecting = true;
         wifiConnectStartTime = millis();
         WiFi.begin(wifiSsid, wifiPassword);
@@ -476,6 +542,9 @@ void setup() {
     // Initialize ESP-NOW
     if (esp_now_init() == ESP_OK) {
         esp_now_register_recv_cb(OnDataRecv);
+        Serial.println("[ESP-NOW] Initialized successfully.");
+    } else {
+        Serial.println("[ESP-NOW] Notice: Sub-node ready when Wi-Fi active.");
     }
 }
 
