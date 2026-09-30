@@ -21,6 +21,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <esp_now.h>
+#include <esp_idf_version.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -295,8 +296,14 @@ bool connectMqtt() {
     return false;
 }
 
-// ESP-NOW Sensor Telemetry Callback
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+// ESP-NOW Sensor Telemetry Callback (compatible with ESP32 Core 3.x / ESP-IDF 5.x and Core 2.x)
+#if defined(ESP_IDF_VERSION_MAJOR) && (ESP_IDF_VERSION_MAJOR >= 5)
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+    const uint8_t *mac = info ? info->src_addr : NULL;
+#else
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+#endif
+    (void)mac;
     memcpy(&incomingSensorData, incomingData, sizeof(incomingSensorData));
 
     const char* uid = (strlen(registeredUserId) > 0) ? registeredUserId : "unclaimed";
