@@ -51,10 +51,17 @@ export async function listScopedHardware(authenticatedUserId: string) {
       mainNode: {
         select: {
           relayState: true,
-          uptimeSeconds: true
+          uptimeSeconds: true,
+          freeHeap: true
         }
       },
-      subNodes: true
+      subNodes: true,
+      sensorReadings: {
+        orderBy: {
+          timestamp: 'desc'
+        },
+        take: 1
+      }
     },
     orderBy: {
       createdAt: 'asc'

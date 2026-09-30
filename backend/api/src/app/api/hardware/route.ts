@@ -13,7 +13,29 @@ export async function GET(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   const hardwareList = await listScopedHardware(auth.user.userId);
-  return NextResponse.json(hardwareList);
+  const now = Date.now();
+
+  const enriched = hardwareList.map((hw: any) => {
+    const lastHbTime = hw.lastHeartbeat ? new Date(hw.lastHeartbeat).getTime() : 0;
+    // Hardware sends heartbeat every 5 seconds. Offline if no heartbeat in 35s or status OFFLINE
+    const isOnline = Boolean(lastHbTime && (now - lastHbTime < 35000) && hw.status !== 'OFFLINE');
+    const dynamicStatus = hw.emergencyStopActive
+      ? 'EMERGENCY_LOCKED'
+      : (isOnline ? 'ONLINE' : 'OFFLINE');
+
+    const latestSensorReading = hw.sensorReadings && hw.sensorReadings.length > 0
+      ? hw.sensorReadings[0]
+      : null;
+
+    return {
+      ...hw,
+      status: dynamicStatus,
+      isOnline,
+      latestSensorReading
+    };
+  });
+
+  return NextResponse.json(enriched);
 }
 
 /**

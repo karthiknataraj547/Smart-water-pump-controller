@@ -253,16 +253,26 @@ class DashboardScreen extends ConsumerWidget {
                 Container(
                   width: 7,
                   height: 7,
-                  decoration: const BoxDecoration(
-                    color: AppColors.emeraldSuccess,
+                  decoration: BoxDecoration(
+                    color: pump.isOnline ? AppColors.emeraldSuccess : const Color(0xFFEF4444),
                     shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: AppColors.emeraldGlow, blurRadius: 4, spreadRadius: 1)],
+                    boxShadow: [
+                      BoxShadow(
+                        color: pump.isOnline ? AppColors.emeraldGlow : const Color(0xFFEF4444).withValues(alpha: 0.4),
+                        blurRadius: 4,
+                        spreadRadius: 1,
+                      )
+                    ],
                   ),
                 ),
                 const SizedBox(width: 5),
                 Text(
-                  'System Online',
-                  style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec, fontWeight: FontWeight.w600),
+                  pump.isOnline ? 'System Online' : 'System Offline',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    color: pump.isOnline ? textSec : const Color(0xFFEF4444),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -765,12 +775,13 @@ class DashboardScreen extends ConsumerWidget {
             // =========================================================
             Row(
               children: [
-                // WATER LEVEL: 72% | 720 / 1000 L
                 Expanded(
                   child: _DashboardMetricCard(
                     title: 'WATER LEVEL',
                     value: '${pump.tankLevelPct.toInt()}%',
-                    subtitle: '${(pump.tankLevelPct * 10).toInt()} / 1000 L',
+                    subtitle: pump.hasRealData
+                        ? '${pump.waterVolumeLiters.toInt()} L'
+                        : (pump.isOnline ? 'Calibrating...' : 'Hardware Offline'),
                     icon: Icons.water_drop_rounded,
                     accentColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
                     isDark: isDark,
@@ -778,12 +789,13 @@ class DashboardScreen extends ConsumerWidget {
                 ),
                 const SizedBox(width: 12),
 
-                // TDS: 245 ppm | Normal
                 Expanded(
                   child: _DashboardMetricCard(
-                    title: 'TDS',
-                    value: '${pump.tdsPpm} ppm',
-                    subtitle: 'Normal Potable',
+                    title: 'TDS PURITY',
+                    value: pump.hasRealData ? '${pump.tdsPpm} ppm' : (pump.isOnline ? 'Reading...' : '--'),
+                    subtitle: pump.hasRealData
+                        ? (pump.tdsPpm < 300 ? 'Normal Potable' : 'High TDS')
+                        : (pump.isOnline ? 'Sensor active' : 'Hardware Offline'),
                     icon: Icons.biotech_rounded,
                     accentColor: AppColors.tealAccent,
                     isDark: isDark,
@@ -795,13 +807,12 @@ class DashboardScreen extends ConsumerWidget {
 
             Row(
               children: [
-                // PUMPED TODAY: 1,280 L | ↑ 8%
                 Expanded(
                   child: _DashboardMetricCard(
-                    title: 'PUMPED TODAY',
-                    value: '1,280 L',
-                    subtitle: '↑ 8% vs yesterday',
-                    icon: Icons.local_drink_rounded,
+                    title: 'FLOW RATE',
+                    value: '${pump.flowRateLpm.toStringAsFixed(1)} LPM',
+                    subtitle: pump.isRunning ? 'Active Pumping' : 'Pump Idle (0 LPM)',
+                    icon: Icons.speed_rounded,
                     accentColor: const Color(0xFF3B82F6),
                     isDark: isDark,
                   ),

@@ -38,6 +38,12 @@ export class MqttTopicBuilder {
         channel: parts[4]
       };
     }
+    if (parts.length === 3 && parts[0] === 'devices') {
+      return {
+        deviceId: parts[1],
+        channel: parts[2]
+      };
+    }
     return null;
   }
 }

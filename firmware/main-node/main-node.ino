@@ -75,7 +75,7 @@ char serialNumber[32] = "SP-CTRL-B244";
 char registeredUserId[64] = "";
 char wifiSsid[64] = "";
 char wifiPassword[64] = "";
-char mqttServer[64] = "192.168.1.100";
+char mqttServer[64] = "broker.emqx.io";
 int mqttPort = 1883;
 
 // Wi-Fi Connection & Status LED State
@@ -332,6 +332,17 @@ bool connectMqtt() {
         snprintf(cmdTopic, sizeof(cmdTopic), "users/%s/devices/%s/command", uid, serialNumber);
         mqttClient.subscribe(cmdTopic);
 
+        // Also subscribe with wildcard user ID so commands from any cloud worker arrive immediately
+        char wildcardCmdTopic[128];
+        snprintf(wildcardCmdTopic, sizeof(wildcardCmdTopic), "users/+/devices/%s/command", serialNumber);
+        mqttClient.subscribe(wildcardCmdTopic);
+
+        // Also subscribe to direct device command topic
+        char directCmdTopic[128];
+        snprintf(directCmdTopic, sizeof(directCmdTopic), "devices/%s/command", serialNumber);
+        mqttClient.subscribe(directCmdTopic);
+
+        Serial.printf("[MQTT] Subscribed to commands for device: %s\n", serialNumber);
         return true;
     }
     return false;
@@ -607,15 +618,17 @@ void loop() {
         char hbTopic[128];
         snprintf(hbTopic, sizeof(hbTopic), "users/%s/devices/%s/heartbeat", uid, serialNumber);
 
-        StaticJsonDocument<192> hb;
+        StaticJsonDocument<256> hb;
         hb["uptimeSeconds"] = millis() / 1000;
         hb["freeHeapBytes"] = ESP.getFreeHeap();
         hb["wifiRssi"] = WiFi.RSSI();
         hb["tankType"] = tankType;
         hb["tankCapacityLiters"] = tankCapacityLiters;
         hb["motorHp"] = motorHp;
+        hb["pumpState"] = relayActive ? "ON" : "OFF";
+        hb["status"] = "ONLINE";
 
-        char buffer[192];
+        char buffer[256];
         serializeJson(hb, buffer);
         mqttClient.publish(hbTopic, buffer, false);
     }

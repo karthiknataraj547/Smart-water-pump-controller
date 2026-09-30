@@ -3,6 +3,7 @@ import { prisma } from '@smartpump/database';
 import { authenticateRequest } from '@/middleware/auth-guard';
 import { verifyHardwareOwnership } from '@/middleware/ownership-guard';
 import { EmergencyStopSchema } from '@smartpump/validation';
+import { publishDeviceCommand } from '@/services/mqtt';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -26,6 +27,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   } catch {
     // Body optional for emergency stop
   }
+
+  const commandId = `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
   // 1. Transactionally activate hardware emergency stop lock and log event
   await prisma.$transaction([
@@ -52,6 +55,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }),
     prisma.deviceCommand.create({
       data: {
+        id: commandId,
         hardwareId: hardware.id,
         command: 'EMERGENCY_STOP',
         status: 'DISPATCHED',
@@ -59,6 +63,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       }
     })
   ]);
+
+  // Dispatch MQTT command directly to physical hardware
+  try {
+    await publishDeviceCommand(auth.user.userId, hardware.serialNumber, 'EMERGENCY_STOP', commandId);
+  } catch (mqttErr) {
+    console.error('[MQTT] Failed to publish EMERGENCY_STOP:', mqttErr);
+  }
 
   return NextResponse.json({
     status: 'EMERGENCY_STOPPED',

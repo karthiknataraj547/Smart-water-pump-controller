@@ -56,6 +56,9 @@ export class CommandDispatcher {
           clearTimeout(timer);
           this.pendingCommands.delete(commandId);
           reject(err);
+        } else {
+          // Also broadcast to direct device topic for guaranteed delivery
+          this.mqttClient.publish(`devices/${hardwareId}/command`, JSON.stringify(payload), { qos: 1 });
         }
       });
     });

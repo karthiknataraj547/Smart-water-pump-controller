@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api/api_client.dart';
 
 enum PumpMode {
   manual,
@@ -99,7 +101,14 @@ class PumpState {
   final PumpMode mode;
   final bool isEmergencyStopped;
   final bool isStarting;
+  final bool isStopping;
+  final bool isOnline;
+  final bool hasRealData;
+  final String? hardwareId;
+  final String? serialNumber;
+  final String? hardwareName;
   final double tankLevelPct;
+  final double waterVolumeLiters;
   final double targetFillPct;
   final double flowRateLpm;
   final int motorRpm;
@@ -111,6 +120,7 @@ class PumpState {
   final bool weatherRainDelayActive;
   final double totalLitersPumpedToday;
   final int dailyCycleCount;
+  final int wifiRssi;
 
   // Water Quality & Hydraulic Telemetry
   final int tdsPpm;
@@ -136,39 +146,47 @@ class PumpState {
   final bool isScheduleEnabled;
 
   const PumpState({
-    this.isRunning = true,
-    this.mode = PumpMode.auto,
+    this.isRunning = false,
+    this.mode = PumpMode.manual,
     this.isEmergencyStopped = false,
     this.isStarting = false,
-    this.tankLevelPct = 72.0,
+    this.isStopping = false,
+    this.isOnline = false,
+    this.hasRealData = false,
+    this.hardwareId,
+    this.serialNumber,
+    this.hardwareName,
+    this.tankLevelPct = 0.0,
+    this.waterVolumeLiters = 0.0,
     this.targetFillPct = 90.0,
-    this.flowRateLpm = 12.4,
-    this.motorRpm = 2850,
-    this.powerWatts = 1120.0,
-    this.motorTempC = 41.8,
-    this.gridVoltage = 231.8,
-    this.activeRunTime = '00:18:32',
+    this.flowRateLpm = 0.0,
+    this.motorRpm = 0,
+    this.powerWatts = 0.0,
+    this.motorTempC = 0.0,
+    this.gridVoltage = 0.0,
+    this.activeRunTime = '00:00:00',
     this.activeTimerMinutes,
     this.weatherRainDelayActive = false,
-    this.totalLitersPumpedToday = 1280.0,
-    this.dailyCycleCount = 14,
-    this.tdsPpm = 245,
-    this.waterTempC = 24.2,
-    this.turbidityNtu = 0.4,
-    this.waterPressureBar = 1.86,
-    this.phLevel = 7.4,
-    this.isRemoteAutoCutoffEnabled = true,
+    this.totalLitersPumpedToday = 0.0,
+    this.dailyCycleCount = 0,
+    this.wifiRssi = 0,
+    this.tdsPpm = 0,
+    this.waterTempC = 0.0,
+    this.turbidityNtu = 0.0,
+    this.waterPressureBar = 0.0,
+    this.phLevel = 7.0,
+    this.isRemoteAutoCutoffEnabled = false,
     this.remoteAutoCutoffMinutes = 45,
     this.remoteAutoCutoffAction = 'Stop Pump + Send Notification',
-    this.autoMinTankLevelPct = 30.0,
-    this.autoMaxTankLevelPct = 90.0,
+    this.autoMinTankLevelPct = 20.0,
+    this.autoMaxTankLevelPct = 95.0,
     this.activeSchedulePresetId = 'dawn',
     this.isCustomSchedule = false,
     this.customStartTime = '06:00 AM',
     this.customEndTime = '06:30 AM',
     this.customDurationMinutes = 30,
     this.customDays = const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    this.isScheduleEnabled = true,
+    this.isScheduleEnabled = false,
   });
 
   PumpState copyWith({
@@ -176,7 +194,14 @@ class PumpState {
     PumpMode? mode,
     bool? isEmergencyStopped,
     bool? isStarting,
+    bool? isStopping,
+    bool? isOnline,
+    bool? hasRealData,
+    String? hardwareId,
+    String? serialNumber,
+    String? hardwareName,
     double? tankLevelPct,
+    double? waterVolumeLiters,
     double? targetFillPct,
     double? flowRateLpm,
     int? motorRpm,
@@ -188,6 +213,7 @@ class PumpState {
     bool? weatherRainDelayActive,
     double? totalLitersPumpedToday,
     int? dailyCycleCount,
+    int? wifiRssi,
     int? tdsPpm,
     double? waterTempC,
     double? turbidityNtu,
@@ -211,7 +237,14 @@ class PumpState {
       mode: mode ?? this.mode,
       isEmergencyStopped: isEmergencyStopped ?? this.isEmergencyStopped,
       isStarting: isStarting ?? this.isStarting,
+      isStopping: isStopping ?? this.isStopping,
+      isOnline: isOnline ?? this.isOnline,
+      hasRealData: hasRealData ?? this.hasRealData,
+      hardwareId: hardwareId ?? this.hardwareId,
+      serialNumber: serialNumber ?? this.serialNumber,
+      hardwareName: hardwareName ?? this.hardwareName,
       tankLevelPct: tankLevelPct ?? this.tankLevelPct,
+      waterVolumeLiters: waterVolumeLiters ?? this.waterVolumeLiters,
       targetFillPct: targetFillPct ?? this.targetFillPct,
       flowRateLpm: flowRateLpm ?? this.flowRateLpm,
       motorRpm: motorRpm ?? this.motorRpm,
@@ -223,6 +256,7 @@ class PumpState {
       weatherRainDelayActive: weatherRainDelayActive ?? this.weatherRainDelayActive,
       totalLitersPumpedToday: totalLitersPumpedToday ?? this.totalLitersPumpedToday,
       dailyCycleCount: dailyCycleCount ?? this.dailyCycleCount,
+      wifiRssi: wifiRssi ?? this.wifiRssi,
       tdsPpm: tdsPpm ?? this.tdsPpm,
       waterTempC: waterTempC ?? this.waterTempC,
       turbidityNtu: turbidityNtu ?? this.turbidityNtu,
@@ -245,61 +279,149 @@ class PumpState {
 }
 
 class PumpNotifier extends StateNotifier<PumpState> {
-  PumpNotifier() : super(const PumpState());
+  final ApiClient _apiClient;
+  Timer? _pollingTimer;
 
-  void togglePump() async {
-    if (state.isEmergencyStopped) return;
-    // Strict requirement: Flutter must not directly execute manual START/STOP when mode = AUTO
-    if (state.mode == PumpMode.auto) return;
+  PumpNotifier({ApiClient? apiClient})
+      : _apiClient = apiClient ?? defaultApiClient,
+        super(const PumpState()) {
+    fetchHardwareState();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      fetchHardwareState();
+    });
+  }
 
-    if (state.isRunning) {
-      state = state.copyWith(
-        isRunning: false,
-        isStarting: false,
-        flowRateLpm: 0.0,
-        motorRpm: 0,
-        powerWatts: 4.2,
-      );
-    } else {
-      state = state.copyWith(isStarting: true);
-      await Future.delayed(const Duration(milliseconds: 600));
-      state = state.copyWith(
-        isStarting: false,
-        isRunning: true,
-        flowRateLpm: 12.4,
-        motorRpm: 2850,
-        powerWatts: 1120.0,
-      );
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> fetchHardwareState() async {
+    try {
+      final resp = await _apiClient.getWithFallback('/api/hardware');
+      if (resp.data is List && (resp.data as List).isNotEmpty) {
+        final list = resp.data as List;
+        final hw = list.first as Map<String, dynamic>;
+        final hwId = hw['id'] as String?;
+        final sNum = hw['serialNumber'] as String?;
+        final hwName = hw['name'] as String?;
+        final isOnline = hw['isOnline'] == true;
+        final isEmergency = hw['emergencyStopActive'] == true || hw['status'] == 'EMERGENCY_LOCKED';
+        final pState = hw['pumpState'] as Map<String, dynamic>?;
+        final pModeStr = (pState?['mode'] as String?)?.toLowerCase();
+        final isPumpOn = pState?['state'] == 'ON';
+        final flowRate = (pState?['currentFlowRateLpm'] as num?)?.toDouble() ?? 0.0;
+        final rssi = (hw['wifiRssi'] as num?)?.toInt() ?? state.wifiRssi;
+
+        final sensor = hw['latestSensorReading'] as Map<String, dynamic>?;
+        double level = state.tankLevelPct;
+        double volume = state.waterVolumeLiters;
+        int tds = state.tdsPpm;
+        bool hasData = state.hasRealData;
+
+        if (sensor != null) {
+          level = (sensor['tankLevelPct'] as num?)?.toDouble() ?? level;
+          volume = (sensor['waterVolumeL'] as num?)?.toDouble() ?? volume;
+          tds = (sensor['tdsPpm'] as num?)?.toInt() ?? tds;
+          hasData = true;
+        }
+
+        PumpMode resolvedMode = state.mode;
+        if (pModeStr == 'auto') {
+          resolvedMode = PumpMode.auto;
+        } else if (pModeStr == 'scheduled') {
+          resolvedMode = PumpMode.scheduled;
+        } else if (pModeStr == 'manual') {
+          resolvedMode = PumpMode.manual;
+        }
+
+        state = state.copyWith(
+          hardwareId: hwId,
+          serialNumber: sNum,
+          hardwareName: hwName,
+          isOnline: isOnline,
+          isEmergencyStopped: isEmergency,
+          isRunning: isPumpOn,
+          mode: resolvedMode,
+          flowRateLpm: isPumpOn ? (flowRate > 0 ? flowRate : (hasData ? flowRate : 0.0)) : 0.0,
+          powerWatts: isPumpOn ? 1120.0 : 0.0,
+          motorRpm: isPumpOn ? 2850 : 0,
+          tankLevelPct: level,
+          waterVolumeLiters: volume,
+          tdsPpm: tds,
+          hasRealData: hasData,
+          wifiRssi: rssi,
+        );
+      } else if (resp.data is List && (resp.data as List).isEmpty) {
+        state = state.copyWith(isOnline: false, hasRealData: false);
+      }
+    } catch (_) {
+      // Backend temporarily unreachable
     }
   }
 
-  void startPump() async {
+  Future<void> togglePump() async {
+    if (state.isEmergencyStopped) return;
+    if (state.mode == PumpMode.auto) return;
+
+    if (state.isRunning) {
+      await stopPump();
+    } else {
+      await startPump();
+    }
+  }
+
+  Future<void> startPump() async {
     if (state.isEmergencyStopped || state.isRunning) return;
-    // Strict requirement: Flutter must not execute manual start when mode = AUTO
     if (state.mode == PumpMode.auto) return;
 
     state = state.copyWith(isStarting: true);
-    await Future.delayed(const Duration(milliseconds: 600));
-    state = state.copyWith(
-      isStarting: false,
-      isRunning: true,
-      flowRateLpm: 12.4,
-      motorRpm: 2850,
-      powerWatts: 1120.0,
-    );
+    try {
+      if (state.hardwareId == null || state.hardwareId!.isEmpty) {
+        await fetchHardwareState();
+      }
+      final hwId = state.hardwareId;
+      if (hwId != null && hwId.isNotEmpty) {
+        await _apiClient.postWithFallback('/api/hardware/$hwId/pump/start', {});
+      }
+      state = state.copyWith(
+        isStarting: false,
+        isRunning: true,
+        motorRpm: 2850,
+        powerWatts: 1120.0,
+      );
+      await fetchHardwareState();
+    } catch (e) {
+      state = state.copyWith(isStarting: false);
+      rethrow;
+    }
   }
 
-  void stopPump() {
-    // Strict requirement: Manual stop unavailable when mode = AUTO (Emergency stop must be used instead)
+  Future<void> stopPump() async {
     if (state.mode == PumpMode.auto) return;
 
-    state = state.copyWith(
-      isRunning: false,
-      isStarting: false,
-      flowRateLpm: 0.0,
-      motorRpm: 0,
-      powerWatts: 4.2,
-    );
+    state = state.copyWith(isStopping: true);
+    try {
+      if (state.hardwareId == null || state.hardwareId!.isEmpty) {
+        await fetchHardwareState();
+      }
+      final hwId = state.hardwareId;
+      if (hwId != null && hwId.isNotEmpty) {
+        await _apiClient.postWithFallback('/api/hardware/$hwId/pump/stop', {});
+      }
+      state = state.copyWith(
+        isStopping: false,
+        isRunning: false,
+        flowRateLpm: 0.0,
+        motorRpm: 0,
+        powerWatts: 0.0,
+      );
+      await fetchHardwareState();
+    } catch (e) {
+      state = state.copyWith(isStopping: false);
+      rethrow;
+    }
   }
 
   void toggleRemoteAutoCutoff() {
@@ -381,7 +503,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
     state = state.copyWith(isScheduleEnabled: !state.isScheduleEnabled);
   }
 
-  void emergencyShutdown() {
+  Future<void> emergencyShutdown() async {
     state = state.copyWith(
       isEmergencyStopped: true,
       isRunning: false,
@@ -390,10 +512,32 @@ class PumpNotifier extends StateNotifier<PumpState> {
       motorRpm: 0,
       powerWatts: 0.0,
     );
+    try {
+      final hwId = state.hardwareId;
+      if (hwId != null && hwId.isNotEmpty) {
+        await _apiClient.postWithFallback(
+          '/api/hardware/$hwId/emergency-stop',
+          {'reason': 'USER_MANUAL_BUTTON'},
+        );
+      }
+      await fetchHardwareState();
+    } catch (_) {}
   }
 
-  void clearEmergencyLockout() {
-    state = state.copyWith(isEmergencyStopped: false);
+  Future<void> clearEmergencyLockout() async {
+    try {
+      final hwId = state.hardwareId;
+      if (hwId != null && hwId.isNotEmpty) {
+        await _apiClient.postWithFallback(
+          '/api/hardware/$hwId/emergency-reset',
+          {'confirmAcknowledge': true},
+        );
+      }
+      state = state.copyWith(isEmergencyStopped: false);
+      await fetchHardwareState();
+    } catch (_) {
+      state = state.copyWith(isEmergencyStopped: false);
+    }
   }
 }
 

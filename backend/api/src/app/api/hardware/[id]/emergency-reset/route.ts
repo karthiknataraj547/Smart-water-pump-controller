@@ -3,6 +3,7 @@ import { prisma } from '@smartpump/database';
 import { authenticateRequest } from '@/middleware/auth-guard';
 import { verifyHardwareOwnership } from '@/middleware/ownership-guard';
 import { EmergencyResetSchema } from '@smartpump/validation';
+import { publishDeviceCommand } from '@/services/mqtt';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -28,6 +29,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const commandId = `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
     // Clear emergency state
     await prisma.$transaction([
       prisma.hardware.update({
@@ -45,6 +48,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       }),
       prisma.deviceCommand.create({
         data: {
+          id: commandId,
           hardwareId: hardware.id,
           command: 'RESET_EMERGENCY',
           status: 'DISPATCHED',
@@ -52,6 +56,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         }
       })
     ]);
+
+    // Dispatch MQTT command directly to physical hardware
+    try {
+      await publishDeviceCommand(auth.user.userId, hardware.serialNumber, 'RESET_EMERGENCY', commandId);
+    } catch (mqttErr) {
+      console.error('[MQTT] Failed to publish RESET_EMERGENCY:', mqttErr);
+    }
 
     return NextResponse.json({
       message: 'Emergency Stop lockout cleared. Pump controls restored to normal operating state.',

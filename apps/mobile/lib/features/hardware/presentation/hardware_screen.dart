@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/auth/auth_provider.dart';
+import '../../../core/pump/pump_provider.dart';
 import '../../../shared/dialogs/app_controls_sheet.dart';
 
 class HardwareScreen extends ConsumerStatefulWidget {
@@ -94,6 +95,7 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
     final isDark = themeMode == ThemeMode.dark;
+    final pump = ref.watch(pumpProvider);
 
     final bgSurface = isDark ? AppColors.darkSurface : AppColors.lightSurface;
     final bgElevated = isDark ? AppColors.darkElevated : AppColors.lightElevated;
@@ -208,9 +210,15 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                         decoration: BoxDecoration(
-                          color: AppColors.emeraldSuccess.withValues(alpha: 0.12),
+                          color: pump.isOnline
+                              ? AppColors.emeraldSuccess.withValues(alpha: 0.12)
+                              : const Color(0xFFEF4444).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.emeraldSuccess.withValues(alpha: 0.3)),
+                          border: Border.all(
+                            color: pump.isOnline
+                                ? AppColors.emeraldSuccess.withValues(alpha: 0.3)
+                                : const Color(0xFFEF4444).withValues(alpha: 0.3),
+                          ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -218,18 +226,18 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                             Container(
                               width: 6,
                               height: 6,
-                              decoration: const BoxDecoration(
-                                color: AppColors.emeraldSuccess,
+                              decoration: BoxDecoration(
+                                color: pump.isOnline ? AppColors.emeraldSuccess : const Color(0xFFEF4444),
                                 shape: BoxShape.circle,
                               ),
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              'SYNCED',
+                              pump.isOnline ? 'CONNECTED' : 'OFFLINE',
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w800,
-                                color: AppColors.emeraldSuccess,
+                                color: pump.isOnline ? AppColors.emeraldSuccess : const Color(0xFFEF4444),
                                 letterSpacing: 0.5,
                               ),
                             ),
@@ -284,9 +292,15 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                                 width: double.infinity,
                                 padding: const EdgeInsets.symmetric(vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: AppColors.emeraldSuccess.withValues(alpha: 0.15),
+                                  color: pump.isOnline
+                                      ? AppColors.emeraldSuccess.withValues(alpha: 0.15)
+                                      : const Color(0xFFEF4444).withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: AppColors.emeraldSuccess.withValues(alpha: 0.4)),
+                                  border: Border.all(
+                                    color: pump.isOnline
+                                        ? AppColors.emeraldSuccess.withValues(alpha: 0.4)
+                                        : const Color(0xFFEF4444).withValues(alpha: 0.4),
+                                  ),
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
@@ -294,19 +308,27 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                                     Container(
                                       width: 6,
                                       height: 6,
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.emeraldSuccess,
+                                      decoration: BoxDecoration(
+                                        color: pump.isOnline ? AppColors.emeraldSuccess : const Color(0xFFEF4444),
                                         shape: BoxShape.circle,
-                                        boxShadow: [BoxShadow(color: AppColors.emeraldGlow, blurRadius: 4, spreadRadius: 1)],
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: pump.isOnline
+                                                ? AppColors.emeraldGlow
+                                                : const Color(0xFFEF4444).withValues(alpha: 0.4),
+                                            blurRadius: 4,
+                                            spreadRadius: 1,
+                                          ),
+                                        ],
                                       ),
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      'ONLINE',
+                                      pump.isOnline ? 'ONLINE' : 'OFFLINE',
                                       style: GoogleFonts.plusJakartaSans(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
-                                        color: AppColors.emeraldSuccess,
+                                        color: pump.isOnline ? AppColors.emeraldSuccess : const Color(0xFFEF4444),
                                         letterSpacing: 0.5,
                                       ),
                                     ),
@@ -356,9 +378,19 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                                 width: double.infinity,
                                 padding: const EdgeInsets.symmetric(vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: AppColors.emeraldSuccess.withValues(alpha: 0.15),
+                                  color: (pump.isOnline && pump.hasRealData)
+                                      ? AppColors.emeraldSuccess.withValues(alpha: 0.15)
+                                      : (pump.isOnline
+                                          ? const Color(0xFFF59E0B).withValues(alpha: 0.15)
+                                          : const Color(0xFFEF4444).withValues(alpha: 0.15)),
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: AppColors.emeraldSuccess.withValues(alpha: 0.4)),
+                                  border: Border.all(
+                                    color: (pump.isOnline && pump.hasRealData)
+                                        ? AppColors.emeraldSuccess.withValues(alpha: 0.4)
+                                        : (pump.isOnline
+                                            ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
+                                            : const Color(0xFFEF4444).withValues(alpha: 0.4)),
+                                  ),
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
@@ -366,19 +398,24 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                                     Container(
                                       width: 6,
                                       height: 6,
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.emeraldSuccess,
+                                      decoration: BoxDecoration(
+                                        color: (pump.isOnline && pump.hasRealData)
+                                            ? AppColors.emeraldSuccess
+                                            : (pump.isOnline ? const Color(0xFFF59E0B) : const Color(0xFFEF4444)),
                                         shape: BoxShape.circle,
-                                        boxShadow: [BoxShadow(color: AppColors.emeraldGlow, blurRadius: 4, spreadRadius: 1)],
                                       ),
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      'ONLINE',
+                                      (pump.isOnline && pump.hasRealData)
+                                          ? 'ONLINE'
+                                          : (pump.isOnline ? 'STANDBY' : 'OFFLINE'),
                                       style: GoogleFonts.plusJakartaSans(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
-                                        color: AppColors.emeraldSuccess,
+                                        color: (pump.isOnline && pump.hasRealData)
+                                            ? AppColors.emeraldSuccess
+                                            : (pump.isOnline ? const Color(0xFFF59E0B) : const Color(0xFFEF4444)),
                                         letterSpacing: 0.5,
                                       ),
                                     ),
@@ -589,7 +626,9 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                   icon: Icons.water_drop_outlined,
                   name: 'Ultrasonic Water Level',
                   model: 'JSN-SR04T Waterproof',
-                  status: 'Active • 120ms',
+                  status: pump.isOnline
+                      ? (pump.hasRealData ? 'Active • ${pump.tankLevelPct.toStringAsFixed(1)}%' : 'Awaiting sensor ping')
+                      : 'Sensor Offline',
                   pin: 'D5 / D6',
                   isDark: isDark,
                 ),
@@ -598,7 +637,9 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                   icon: Icons.speed_rounded,
                   name: 'Hall Effect Flow Meter',
                   model: 'YF-S201 Turbine (1-30 LPM)',
-                  status: 'Active • 12.4 L/min',
+                  status: pump.isOnline
+                      ? (pump.isRunning ? 'Active • ${pump.flowRateLpm.toStringAsFixed(1)} L/min' : 'Idle • 0.0 L/min')
+                      : 'Sensor Offline',
                   pin: 'D2 (Interrupt)',
                   isDark: isDark,
                 ),
@@ -607,7 +648,9 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                   icon: Icons.biotech_outlined,
                   name: 'Analog TDS Purity Probe',
                   model: 'Total Dissolved Solids Sensor',
-                  status: 'Calibrated • 185 PPM',
+                  status: pump.isOnline
+                      ? (pump.hasRealData ? 'Calibrated • ${pump.tdsPpm} PPM' : 'Awaiting reading')
+                      : 'Sensor Offline',
                   pin: 'A0 ADC',
                   isDark: isDark,
                 ),

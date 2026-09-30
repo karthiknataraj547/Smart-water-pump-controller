@@ -57,16 +57,26 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
                 Container(
                   width: 6,
                   height: 6,
-                  decoration: const BoxDecoration(
-                    color: AppColors.emeraldSuccess,
+                  decoration: BoxDecoration(
+                    color: pump.isOnline ? AppColors.emeraldSuccess : const Color(0xFFEF4444),
                     shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: AppColors.emeraldGlow, blurRadius: 4, spreadRadius: 1)],
+                    boxShadow: [
+                      BoxShadow(
+                        color: pump.isOnline ? AppColors.emeraldGlow : const Color(0xFFEF4444).withValues(alpha: 0.4),
+                        blurRadius: 4,
+                        spreadRadius: 1,
+                      )
+                    ],
                   ),
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  _selectedFilter == 'Live' ? 'Streaming' : _selectedFilter,
-                  style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.emeraldSuccess),
+                  pump.isOnline ? (_selectedFilter == 'Live' ? 'Streaming' : _selectedFilter) : 'Offline',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: pump.isOnline ? AppColors.emeraldSuccess : const Color(0xFFEF4444),
+                  ),
                 ),
               ],
             ),
@@ -427,7 +437,7 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
                           ),
                         ),
                         borderData: FlBorderData(show: false),
-                        lineBarsData: _buildUnifiedLineBars(isDark),
+                        lineBarsData: _buildUnifiedLineBars(isDark, pump),
                       ),
                     ),
                   ),
@@ -460,29 +470,65 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: AppColors.emeraldSuccess.withValues(alpha: 0.15),
+                          color: pump.isOnline
+                              ? AppColors.emeraldSuccess.withValues(alpha: 0.15)
+                              : const Color(0xFFEF4444).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          'Aggregated OK',
-                          style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.emeraldSuccess),
+                          pump.isOnline ? 'Online' : 'Offline',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: pump.isOnline ? AppColors.emeraldSuccess : const Color(0xFFEF4444),
+                          ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 16),
 
-                  _SummaryStatRow(label: 'Total Volume Pumped', value: '1,280 L', textPrim: textPrim, textSec: textSec),
+                  _SummaryStatRow(
+                    label: 'Total Volume Pumped',
+                    value: '${pump.totalLitersPumpedToday.toInt()} L',
+                    textPrim: textPrim,
+                    textSec: textSec,
+                  ),
                   const Divider(height: 18),
-                  _SummaryStatRow(label: 'Daily Cycles Completed', value: '${pump.dailyCycleCount} cycles', textPrim: textPrim, textSec: textSec),
+                  _SummaryStatRow(
+                    label: 'Current Tank Level',
+                    value: pump.hasRealData ? '${pump.tankLevelPct.toStringAsFixed(1)}%' : (pump.isOnline ? 'Calibrating...' : 'Offline'),
+                    textPrim: textPrim,
+                    textSec: textSec,
+                  ),
                   const Divider(height: 18),
-                  _SummaryStatRow(label: 'Average Flow Rate', value: '11.8 LPM', textPrim: textPrim, textSec: textSec),
+                  _SummaryStatRow(
+                    label: 'Current Flow Rate',
+                    value: '${pump.flowRateLpm.toStringAsFixed(1)} LPM',
+                    textPrim: textPrim,
+                    textSec: textSec,
+                  ),
                   const Divider(height: 18),
-                  _SummaryStatRow(label: 'Peak Pumping Flow', value: '15.2 LPM', textPrim: textPrim, textSec: textSec),
+                  _SummaryStatRow(
+                    label: 'Water Quality (TDS)',
+                    value: pump.hasRealData ? '${pump.tdsPpm} ppm' : (pump.isOnline ? 'Active' : '--'),
+                    textPrim: textPrim,
+                    textSec: textSec,
+                  ),
                   const Divider(height: 18),
-                  _SummaryStatRow(label: 'Average Mineral TDS', value: '238 ppm', textPrim: textPrim, textSec: textSec),
+                  _SummaryStatRow(
+                    label: 'Pump Motor Speed',
+                    value: pump.isRunning ? '${pump.motorRpm} RPM' : '0 RPM',
+                    textPrim: textPrim,
+                    textSec: textSec,
+                  ),
                   const Divider(height: 18),
-                  _SummaryStatRow(label: 'Active Run Time Today', value: '2h 18m', textPrim: textPrim, textSec: textSec),
+                  _SummaryStatRow(
+                    label: 'Active Run Time',
+                    value: pump.activeRunTime,
+                    textPrim: textPrim,
+                    textSec: textSec,
+                  ),
                 ],
               ),
             ),
@@ -507,24 +553,17 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
     }
   }
 
-  List<LineChartBarData> _buildUnifiedLineBars(bool isDark) {
+  List<LineChartBarData> _buildUnifiedLineBars(bool isDark, PumpState pump) {
     final bars = <LineChartBarData>[];
 
     // 1. Water Level (% direct: 0 - 100)
     if (_showWaterLevel) {
       final levelColor = isDark ? AppColors.cyanPrimary : AppColors.blueElectric;
+      final val = (pump.isOnline && pump.hasRealData) ? pump.tankLevelPct : 0.0;
       bars.add(
         LineChartBarData(
-          spots: const [
-            FlSpot(0, 32),
-            FlSpot(1, 40),
-            FlSpot(2, 54),
-            FlSpot(3, 65),
-            FlSpot(4, 70),
-            FlSpot(5, 72),
-            FlSpot(6, 72),
-          ],
-          isCurved: true,
+          spots: List.generate(7, (i) => FlSpot(i.toDouble(), val)),
+          isCurved: false,
           color: levelColor,
           barWidth: 2.8,
           isStrokeCapRound: true,
@@ -547,18 +586,13 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
     // 2. Flow Rate (0 - 20 LPM -> normalized to 0 - 100%)
     if (_showFlowRate) {
       const flowColor = Color(0xFF10B981);
+      final normFlow = (pump.isOnline && pump.isRunning)
+          ? ((pump.flowRateLpm / 20.0) * 100.0).clamp(0.0, 100.0)
+          : 0.0;
       bars.add(
         LineChartBarData(
-          spots: const [
-            FlSpot(0, 0),
-            FlSpot(1, 57.5), // 11.5 LPM
-            FlSpot(2, 74.0), // 14.8 LPM
-            FlSpot(3, 76.0), // 15.2 LPM
-            FlSpot(4, 60.0), // 12.0 LPM
-            FlSpot(5, 62.0), // 12.4 LPM
-            FlSpot(6, 62.0), // 12.4 LPM
-          ],
-          isCurved: true,
+          spots: List.generate(7, (i) => FlSpot(i.toDouble(), normFlow)),
+          isCurved: false,
           color: flowColor,
           barWidth: 2.4,
           isStrokeCapRound: true,
@@ -571,18 +605,13 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
     // 3. TDS (0 - 400 ppm -> normalized to 0 - 100%)
     if (_showTds) {
       const tdsColor = AppColors.tealAccent;
+      final normTds = (pump.isOnline && pump.hasRealData)
+          ? ((pump.tdsPpm / 400.0) * 100.0).clamp(0.0, 100.0)
+          : 0.0;
       bars.add(
         LineChartBarData(
-          spots: const [
-            FlSpot(0, 62.5), // 250 ppm
-            FlSpot(1, 61.5), // 246 ppm
-            FlSpot(2, 60.0), // 240 ppm
-            FlSpot(3, 59.5), // 238 ppm
-            FlSpot(4, 60.5), // 242 ppm
-            FlSpot(5, 61.2), // 245 ppm
-            FlSpot(6, 61.2), // 245 ppm
-          ],
-          isCurved: true,
+          spots: List.generate(7, (i) => FlSpot(i.toDouble(), normTds)),
+          isCurved: false,
           color: tdsColor,
           barWidth: 2.2,
           isStrokeCapRound: true,
@@ -595,18 +624,13 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
     // 4. Motor RPM (0 - 3000 RPM -> normalized to 0 - 100%)
     if (_showMotorRpm) {
       const rpmColor = Color(0xFF8B5CF6);
+      final normRpm = (pump.isOnline && pump.isRunning)
+          ? ((pump.motorRpm / 3000.0) * 100.0).clamp(0.0, 100.0)
+          : 0.0;
       bars.add(
         LineChartBarData(
-          spots: const [
-            FlSpot(0, 0),
-            FlSpot(1, 80.0), // 2400 RPM
-            FlSpot(2, 95.0), // 2850 RPM
-            FlSpot(3, 95.0), // 2850 RPM
-            FlSpot(4, 95.0), // 2850 RPM
-            FlSpot(5, 95.0), // 2850 RPM
-            FlSpot(6, 95.0), // 2850 RPM
-          ],
-          isCurved: true,
+          spots: List.generate(7, (i) => FlSpot(i.toDouble(), normRpm)),
+          isCurved: false,
           color: rpmColor,
           barWidth: 2.0,
           isStrokeCapRound: true,

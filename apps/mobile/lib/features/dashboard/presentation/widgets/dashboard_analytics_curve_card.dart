@@ -122,60 +122,58 @@ class _DashboardAnalyticsCurveCardState extends State<DashboardAnalyticsCurveCar
   }
 
   Map<String, String> _getStats(AnalyticsParameter param) {
+    if (!widget.pump.isOnline && !widget.pump.hasRealData) {
+      return {'MIN': '--', 'AVG': '--', 'PEAK': '--'};
+    }
     switch (param) {
       case AnalyticsParameter.waterLevel:
-        return {'MIN': '28%', 'AVG': '64%', 'PEAK': '88%'};
+        final val = widget.pump.tankLevelPct;
+        return {
+          'MIN': '${(val * 0.95).clamp(0, 100).toStringAsFixed(0)}%',
+          'AVG': '${val.toStringAsFixed(0)}%',
+          'PEAK': '${val.toStringAsFixed(0)}%'
+        };
       case AnalyticsParameter.flowRate:
-        return {'MIN': '0.0', 'AVG': '11.8', 'PEAK': '14.2'};
+        final val = widget.pump.flowRateLpm;
+        return {
+          'MIN': '0.0',
+          'AVG': val.toStringAsFixed(1),
+          'PEAK': val.toStringAsFixed(1)
+        };
       case AnalyticsParameter.tdsPurity:
-        return {'MIN': '220', 'AVG': '238', 'PEAK': '254'};
+        final val = widget.pump.tdsPpm;
+        return {
+          'MIN': '$val',
+          'AVG': '$val',
+          'PEAK': '$val'
+        };
       case AnalyticsParameter.motorSpeed:
-        return {'MIN': '0', 'AVG': '2780', 'PEAK': '2910'};
+        final val = widget.pump.isRunning ? widget.pump.motorRpm : 0;
+        return {
+          'MIN': '0',
+          'AVG': '$val',
+          'PEAK': '$val'
+        };
     }
   }
 
   List<FlSpot> _getSpotsForParam(AnalyticsParameter param) {
+    if (!widget.pump.isOnline && !widget.pump.hasRealData) {
+      return List.generate(7, (i) => FlSpot(i.toDouble(), 0));
+    }
     switch (param) {
       case AnalyticsParameter.waterLevel:
-        return const [
-          FlSpot(0, 32),
-          FlSpot(1, 38),
-          FlSpot(2, 49),
-          FlSpot(3, 59),
-          FlSpot(4, 66),
-          FlSpot(5, 70),
-          FlSpot(6, 72),
-        ];
+        final val = widget.pump.tankLevelPct;
+        return List.generate(7, (i) => FlSpot(i.toDouble(), val));
       case AnalyticsParameter.flowRate:
-        return const [
-          FlSpot(0, 0),
-          FlSpot(1, 4.2),
-          FlSpot(2, 10.5),
-          FlSpot(3, 13.8),
-          FlSpot(4, 12.1),
-          FlSpot(5, 12.6),
-          FlSpot(6, 12.4),
-        ];
+        final val = widget.pump.flowRateLpm;
+        return List.generate(7, (i) => FlSpot(i.toDouble(), val));
       case AnalyticsParameter.tdsPurity:
-        return const [
-          FlSpot(0, 248),
-          FlSpot(1, 246),
-          FlSpot(2, 244),
-          FlSpot(3, 242),
-          FlSpot(4, 243),
-          FlSpot(5, 244),
-          FlSpot(6, 245),
-        ];
+        final val = widget.pump.tdsPpm.toDouble();
+        return List.generate(7, (i) => FlSpot(i.toDouble(), val));
       case AnalyticsParameter.motorSpeed:
-        return const [
-          FlSpot(0, 0),
-          FlSpot(1, 1400),
-          FlSpot(2, 2800),
-          FlSpot(3, 2850),
-          FlSpot(4, 2850),
-          FlSpot(5, 2850),
-          FlSpot(6, 2850),
-        ];
+        final val = (widget.pump.isRunning ? widget.pump.motorRpm : 0).toDouble();
+        return List.generate(7, (i) => FlSpot(i.toDouble(), val));
     }
   }
 

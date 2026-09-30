@@ -4,6 +4,7 @@ import { authenticateRequest } from '@/middleware/auth-guard';
 import { verifyHardwareOwnership } from '@/middleware/ownership-guard';
 import { checkRateLimit, rateLimitResponse } from '@/middleware/rate-limiter';
 import { SYSTEM_CONSTANTS } from '@smartpump/shared';
+import { publishDeviceCommand } from '@/services/mqtt';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -54,7 +55,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
   });
 
-  // Note: Backend MQTT service publishes users/{userId}/devices/{deviceId}/command
+  // Dispatch MQTT command directly to physical hardware
+  try {
+    await publishDeviceCommand(auth.user.userId, hardware.serialNumber, 'PUMP_START', commandId);
+  } catch (mqttErr) {
+    console.error('[MQTT] Failed to publish PUMP_START:', mqttErr);
+  }
+
   // Return 202 Accepted. The mobile app displays "Starting..." until ACK arrives.
   return NextResponse.json(
     {
