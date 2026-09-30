@@ -9,7 +9,7 @@
     "apps/web"
   ],
   "scripts": {
-    "build": "npm --prefix apps/web run build",
+    "build": "node scripts/build.js",
     "dev:backend": "npm --workspace=backend/api run dev",
     "dev:web": "npm --workspace=apps/web run dev",
     "build:packages": "npm --workspace=packages/shared run build && npm --workspace=packages/validation run build && npm --workspace=packages/auth run build && npm --workspace=packages/mqtt run build && npm --workspace=packages/database run build",
