@@ -130,7 +130,7 @@ class _PumpControlScreenState extends ConsumerState<PumpControlScreen> {
                     ),
                     Switch(
                       value: isEnabled,
-                      activeColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                      activeThumbColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
                       onChanged: (val) {
                         setSheetState(() => isEnabled = val);
                       },
@@ -1280,7 +1280,7 @@ class _RuleConfigItem extends StatelessWidget {
               ),
               Switch(
                 value: isEnabled,
-                activeColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                activeThumbColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
                 onChanged: onChanged,
               ),
             ],

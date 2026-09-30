@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/auth/auth_provider.dart';
@@ -16,7 +17,8 @@ class BleProvisioningDialog extends ConsumerStatefulWidget {
   ConsumerState<BleProvisioningDialog> createState() => _BleProvisioningDialogState();
 }
 
-class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
+class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
+    with SingleTickerProviderStateMixin {
   // Step 0: Scanning / Select Discovered Device
   // Step 1: Wi-Fi Setup
   // Step 2: Connecting Interface Stage (Multi-stage verification)
@@ -28,6 +30,10 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
   List<BleDiscoveredNode> _discoveredDevices = [];
   BleDiscoveredNode? _selectedNode;
   StreamSubscription? _scanSubscription;
+  StreamSubscription? _adapterSubscription;
+  BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
+
+  late AnimationController _radarController;
 
   // Wi-Fi Setup Form
   final _ssidController = TextEditingController();
@@ -36,7 +42,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
 
   // Connecting Stage Status
   ConnectionStage _connectionStage = ConnectionStage.idle;
-  String _connectionStatusMessage = 'Initializing secure handshake...';
+  String _connectionStatusMessage = 'Initializing secure Bluetooth link...';
   String? _connectionError;
 
   // Tank Setup Parameters
@@ -64,12 +70,20 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
   @override
   void initState() {
     super.initState();
+    _radarController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat();
+
+    _listenAdapterState();
     _startBleScan();
   }
 
   @override
   void dispose() {
+    _radarController.dispose();
     _scanSubscription?.cancel();
+    _adapterSubscription?.cancel();
     BleProvisioningService.stopScan();
     _ssidController.dispose();
     _passwordController.dispose();
@@ -77,7 +91,17 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
     super.dispose();
   }
 
-  void _startBleScan() {
+  void _listenAdapterState() {
+    try {
+      _adapterSubscription = FlutterBluePlus.adapterState.listen((state) {
+        if (mounted) {
+          setState(() => _adapterState = state);
+        }
+      });
+    } catch (_) {}
+  }
+
+  void _startBleScan() async {
     setState(() {
       _isScanning = true;
       _discoveredDevices = [];
@@ -85,34 +109,50 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
     });
 
     _scanSubscription?.cancel();
-    _scanSubscription = BleProvisioningService.scanForNodes().listen((nodes) {
-      if (mounted) {
-        setState(() {
-          _discoveredDevices = nodes;
-        });
-      }
-    });
+    _scanSubscription = BleProvisioningService.scanForNodes().listen(
+      (nodes) {
+        if (mounted) {
+          setState(() {
+            _discoveredDevices = nodes;
+            // Auto-select first matching Smart Controller if not selected
+            if (_selectedNode == null && nodes.isNotEmpty) {
+              final smartNode = nodes.firstWhere(
+                (n) => n.isSmartPumpCandidate,
+                orElse: () => nodes.first,
+              );
+              _selectedNode = smartNode;
+            }
+          });
+        }
+      },
+      onError: (err) {
+        if (mounted) {
+          setState(() => _isScanning = false);
+        }
+      },
+    );
 
-    // After 6 seconds of scanning, mark scanning finished
-    Future.delayed(const Duration(seconds: 6), () {
+    // Stop scanning animation after 10 seconds
+    Future.delayed(const Duration(seconds: 10), () {
       if (mounted) {
         setState(() => _isScanning = false);
       }
     });
   }
 
-  /// Optional simulation trigger strictly for developers on emulators without Bluetooth radio
+  /// Simulation trigger for testing without hardware
   void _simulateHardwareInPairingMode() {
     setState(() {
-      final simMac = '24:6F:28:B2:44:90';
-      final simNode = BleDiscoveredNode(
+      const simMac = '24:6F:28:B2:44:90';
+      const simNode = BleDiscoveredNode(
         id: simMac,
-        name: 'SmartPump-Gateway-B244',
+        name: 'Smart Controller Hub (4490)',
         macAddress: simMac,
-        rssi: -56,
+        rssi: -58,
+        isSmartPumpCandidate: true,
       );
       if (!_discoveredDevices.any((d) => d.macAddress == simMac)) {
-        _discoveredDevices.add(simNode);
+        _discoveredDevices.insert(0, simNode);
       }
       _selectedNode = simNode;
       _isScanning = false;
@@ -125,13 +165,19 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
 
     if (ssid.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your Wi-Fi SSID network name.')),
+        const SnackBar(
+          content: Text('Please enter your 2.4 GHz Wi-Fi network name.'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       return;
     }
     if (password.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Wi-Fi password must be at least 8 characters.')),
+        const SnackBar(
+          content: Text('Wi-Fi password must be at least 8 characters.'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       return;
     }
@@ -145,7 +191,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
       _currentStep = 2; // Move to Connecting Interface Stage
       _connectionStage = ConnectionStage.transmittingWifi;
       _connectionError = null;
-      _connectionStatusMessage = 'Pushing Wi-Fi credentials to ESP32 over BLE...';
+      _connectionStatusMessage = 'Pushing Wi-Fi credentials to Smart Controller...';
     });
 
     try {
@@ -164,17 +210,17 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
         },
       );
 
-      // ONLY transition to Connected when verification is completely successful!
+      // Successfully connected!
       if (mounted) {
         setState(() {
-          _currentStep = 3; // Show Connected stage
+          _currentStep = 3; // Connected Stage
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _connectionStage = ConnectionStage.failed;
-          _connectionError = e.toString().replaceAll('Exception: ', '');
+          _connectionError = e.toString().replaceFirst('Exception: ', '');
         });
       }
     }
@@ -183,11 +229,11 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
   void _finalizeTankSetupAndClaim() async {
     setState(() => _isSavingTankConfig = true);
 
-    final capacity = _isCustomCapacity
-        ? (int.tryParse(_customCapacityController.text) ?? _tankCapacityLiters)
-        : _tankCapacityLiters;
-
     try {
+      final capacity = _isCustomCapacity
+          ? (int.tryParse(_customCapacityController.text.trim()) ?? 1000)
+          : _tankCapacityLiters;
+
       if (_selectedNode != null) {
         await BleProvisioningService.pushTankConfig(
           node: _selectedNode!,
@@ -211,7 +257,10 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
       if (mounted) {
         setState(() => _isSavingTankConfig = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving configuration: $e')),
+          SnackBar(
+            content: Text('Error saving configuration: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     }
@@ -228,93 +277,190 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
     final borderCol = isDark ? AppColors.darkBorder : AppColors.lightBorder;
 
     final stepTitles = [
-      'Discover Node',
+      'Discover Controller',
       'Wi-Fi Setup',
-      'Connecting...',
-      'Connected',
-      'Tank Setup',
+      'Pairing Station',
+      'Controller Online',
+      'System Calibration',
     ];
 
     return Container(
-      height: MediaQuery.of(context).size.height * 0.88,
+      height: MediaQuery.of(context).size.height * 0.90,
       decoration: BoxDecoration(
         color: bgSurface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.6 : 0.15),
+            blurRadius: 30,
+            offset: const Offset(0, -10),
+          ),
+        ],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Drag handle
           Center(
             child: Container(
-              width: 40,
-              height: 4,
+              margin: const EdgeInsets.only(top: 14, bottom: 8),
+              width: 44,
+              height: 4.5,
               decoration: BoxDecoration(
                 color: borderCol,
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.circular(3),
               ),
             ),
           ),
-          const SizedBox(height: 16),
 
           // Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    stepTitles[_currentStep],
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: textPrim,
-                      letterSpacing: -0.3,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      stepTitles[_currentStep],
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                        color: textPrim,
+                        letterSpacing: -0.4,
+                      ),
                     ),
-                  ),
-                  Text(
-                    'Step ${_currentStep + 1} of 5',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Step ${_currentStep + 1} of 5 • Setup Wizard',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
-              IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: Icon(Icons.close_rounded, color: textSec),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // 5-Step Progress Bar
-          Row(
-            children: List.generate(5, (index) {
-              final isPassed = index <= _currentStep;
-              return Expanded(
-                child: Container(
-                  height: 4,
-                  margin: EdgeInsets.only(right: index < 4 ? 6 : 0),
-                  decoration: BoxDecoration(
-                    color: isPassed
-                        ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
-                        : borderCol,
-                    borderRadius: BorderRadius.circular(2),
+                  ],
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.darkElevated : AppColors.lightElevated,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: borderCol),
+                    ),
+                    child: Icon(Icons.close_rounded, color: textSec, size: 18),
                   ),
                 ),
-              );
-            }),
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
+
+          // 5-Step Visual Stepper Progress Bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              children: List.generate(5, (index) {
+                final isPassed = index <= _currentStep;
+                final isCurrent = index == _currentStep;
+                return Expanded(
+                  child: Container(
+                    height: isCurrent ? 5 : 4,
+                    margin: EdgeInsets.only(right: index < 4 ? 6 : 0),
+                    decoration: BoxDecoration(
+                      gradient: isPassed
+                          ? LinearGradient(
+                              colors: isDark
+                                  ? [AppColors.cyanPrimary, AppColors.blueElectric]
+                                  : [AppColors.blueElectric, const Color(0xFF1D4ED8)],
+                            )
+                          : null,
+                      color: isPassed ? null : borderCol,
+                      borderRadius: BorderRadius.circular(3),
+                      boxShadow: isCurrent
+                          ? [
+                              BoxShadow(
+                                color: (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
+                                    .withValues(alpha: 0.45),
+                                blurRadius: 6,
+                                offset: const Offset(0, 1),
+                              ),
+                            ]
+                          : null,
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          // Bluetooth Adapter State Alert (if turned off)
+          if (_adapterState == BluetoothAdapterState.off)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0x22F59E0B),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.bluetooth_disabled_rounded, color: Color(0xFFF59E0B), size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Bluetooth is currently disabled on your phone.',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: textPrim,
+                        ),
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: BleProvisioningService.turnOnBluetooth,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFF59E0B),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: Text(
+                        'Enable',
+                        style: GoogleFonts.plusJakartaSans(fontSize: 11.5, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
           // Dynamic Body for each Step
           Expanded(
-            child: _buildStepContent(isDark, textPrim, textSec, borderCol),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: _buildStepContent(isDark, textPrim, textSec, borderCol),
+            ),
           ),
         ],
       ),
@@ -337,81 +483,109 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
     }
   }
 
-  /// STEP 0: REAL BLE DISCOVERY (NO MOCK DEVICE)
+  /// STEP 0: PRODUCTION BLUETOOTH SCANNER
   Widget _buildDiscoveryStep(bool isDark, Color textPrim, Color textSec, Color borderCol) {
     final bgElevated = isDark ? AppColors.darkElevated : AppColors.lightElevated;
+    final primaryAccent = isDark ? AppColors.cyanPrimary : AppColors.blueElectric;
 
     if (_discoveredDevices.isEmpty) {
       return Column(
         children: [
-          const SizedBox(height: 10),
-          // Pulsing Radar Animation
+          const SizedBox(height: 14),
+
+          // High-Tech Radar Sonar Visualizer
           Center(
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
-                          .withValues(alpha: 0.25),
-                      width: 2,
-                    ),
-                  ),
-                ),
-                Container(
-                  width: 74,
-                  height: 74,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isDark ? AppColors.cyanGlow : const Color(0x1A2563EB),
-                  ),
-                  child: Icon(
-                    Icons.bluetooth_searching_rounded,
-                    color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                    size: 36,
-                  ),
-                ),
-                if (_isScanning)
-                  SizedBox(
-                    width: 100,
-                    height: 100,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                    ),
-                  ),
-              ],
+            child: SizedBox(
+              width: 140,
+              height: 140,
+              child: AnimatedBuilder(
+                animation: _radarController,
+                builder: (context, child) {
+                  return Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Outer ripple ring
+                      if (_isScanning)
+                        Container(
+                          width: 70 + (_radarController.value * 70),
+                          height: 70 + (_radarController.value * 70),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: primaryAccent.withValues(
+                                alpha: (1.0 - _radarController.value).clamp(0.0, 0.4),
+                              ),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      // Mid ring
+                      Container(
+                        width: 90,
+                        height: 90,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: primaryAccent.withValues(alpha: 0.25),
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                      // Inner core
+                      Container(
+                        width: 68,
+                        height: 68,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: isDark
+                                ? [AppColors.cyanGlow, const Color(0x3306B6D4)]
+                                : [const Color(0x222563EB), const Color(0x112563EB)],
+                          ),
+                        ),
+                        child: Icon(
+                          _isScanning
+                              ? Icons.bluetooth_searching_rounded
+                              : Icons.bluetooth_disabled_rounded,
+                          color: primaryAccent,
+                          size: 32,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
+
           Text(
             _isScanning
-                ? 'Scanning for Bluetooth Provisioning...'
-                : 'No SmartPump nodes detected',
+                ? 'Scanning for Smart Controllers...'
+                : 'No Smart Controllers Found Nearby',
             style: GoogleFonts.plusJakartaSans(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
+              fontSize: 16.5,
+              fontWeight: FontWeight.w800,
               color: textPrim,
+              letterSpacing: -0.3,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
-            'Hardware must be in Bluetooth Pairing Mode to appear here.',
+            _isScanning
+                ? 'Listening on 2.4GHz Bluetooth LE pairing channels...'
+                : 'Make sure your controller is powered on and in pairing mode.',
             textAlign: TextAlign.center,
-            style: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
+            style: GoogleFonts.plusJakartaSans(fontSize: 12.5, color: textSec),
           ),
           const SizedBox(height: 20),
 
-          // Hardware Pairing Mode Guide Box
+          // Hardware Pairing Mode Guide
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: bgElevated,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(color: borderCol),
             ),
             child: Column(
@@ -419,29 +593,29 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.info_outline_rounded,
-                        color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric, size: 18),
+                    Icon(Icons.tune_rounded, color: primaryAccent, size: 18),
                     const SizedBox(width: 8),
                     Text(
-                      'How to put ESP32 in BLE Pairing Mode:',
+                      'Activating Controller Pairing Mode',
                       style: GoogleFonts.plusJakartaSans(
-                        fontSize: 12.5,
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: textPrim,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                _buildInstructionRow('1', 'Power on the SmartPump Main Node controller.', textSec),
-                const SizedBox(height: 6),
+                const SizedBox(height: 12),
+                _buildInstructionRow('1', 'Power on the Smart Pump Controller station.', textSec),
+                const SizedBox(height: 8),
                 _buildInstructionRow(
-                    '2', 'Press and hold the BOOT / PRG button for 3 seconds.', textSec),
-                const SizedBox(height: 6),
+                    '2', 'Press and hold the Pairing button for 3 seconds.', textSec),
+                const SizedBox(height: 8),
                 _buildInstructionRow(
-                    '3', 'Status LED will pulse BLUE indicating pairing mode.', textSec),
-                const SizedBox(height: 6),
-                _buildInstructionRow('4', 'Ensure Bluetooth is turned ON on your phone.', textSec),
+                    '3', 'Status LED will pulse Blue to confirm ready state.', textSec),
+                const SizedBox(height: 8),
+                _buildInstructionRow(
+                    '4', 'Keep phone within 5 meters of the controller.', textSec),
               ],
             ),
           ),
@@ -451,28 +625,38 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
           // Rescan Button
           SizedBox(
             width: double.infinity,
-            height: 50,
+            height: 52,
             child: ElevatedButton.icon(
               onPressed: _isScanning ? null : _startBleScan,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
+              icon: _isScanning
+                  ? SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: isDark ? Colors.black : Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.refresh_rounded, size: 18),
               label: Text(
-                _isScanning ? 'Scanning nearby frequencies...' : 'Scan Again',
+                _isScanning ? 'Searching Nearby Frequencies...' : 'Scan for Controllers Again',
                 style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                backgroundColor: primaryAccent,
                 foregroundColor: isDark ? Colors.black : Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
               ),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
 
-          // Simulator Test Button (clearly labeled for dev/emulator environments)
+          // Simulator option for test environments
           TextButton(
             onPressed: _simulateHardwareInPairingMode,
             child: Text(
-              'Developer: Test with Local ESP32 Hardware Beacon',
+              'Simulate Controller Hardware Beacon (Developer Mode)',
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 11,
                 color: textSec,
@@ -480,100 +664,102 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
               ),
             ),
           ),
+          const SizedBox(height: 12),
         ],
       );
     }
 
-    // Devices Were Found!
+    // Devices Found
+    final smartNodes = _discoveredDevices.where((d) => d.isSmartPumpCandidate).toList();
+    final otherNodes = _discoveredDevices.where((d) => !d.isSmartPumpCandidate).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'Discovered Hardware (${_discoveredDevices.length})',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: textPrim,
-              ),
+            Row(
+              children: [
+                Text(
+                  'Nearby Controllers (${_discoveredDevices.length})',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: textPrim,
+                  ),
+                ),
+                if (_isScanning) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: primaryAccent),
+                  ),
+                ],
+              ],
             ),
             TextButton.icon(
-              onPressed: _startBleScan,
-              icon: const Icon(Icons.refresh_rounded, size: 14),
-              label: Text('Rescan', style: GoogleFonts.plusJakartaSans(fontSize: 12)),
+              onPressed: _isScanning ? null : _startBleScan,
+              icon: Icon(Icons.refresh_rounded, size: 14, color: primaryAccent),
+              label: Text(
+                _isScanning ? 'Scanning...' : 'Rescan',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: primaryAccent,
+                ),
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 2),
         Text(
-          'Select your SmartPump node to push Wi-Fi credentials:',
+          'Select your controller to configure Wi-Fi credentials:',
           style: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
 
         Expanded(
-          child: ListView.separated(
-            itemCount: _discoveredDevices.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final node = _discoveredDevices[index];
-              final isSelected = _selectedNode?.macAddress == node.macAddress;
-
-              return Container(
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? (isDark ? AppColors.cyanGlow : const Color(0x152563EB))
-                      : bgElevated,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isSelected
-                        ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
-                        : borderCol,
-                    width: isSelected ? 2 : 1,
-                  ),
-                ),
-                child: ListTile(
-                  onTap: () {
-                    setState(() => _selectedNode = node);
-                  },
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  leading: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.bluetooth_connected_rounded,
-                      color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                      size: 22,
-                    ),
-                  ),
-                  title: Text(
-                    node.name,
+          child: ListView(
+            physics: const BouncingScrollPhysics(),
+            children: [
+              if (smartNodes.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    'SMART CONTROLLERS',
                     style: GoogleFonts.plusJakartaSans(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w700,
-                      color: textPrim,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: primaryAccent,
+                      letterSpacing: 0.8,
                     ),
                   ),
-                  subtitle: Text(
-                    'MAC: ${node.macAddress} • Signal: ${node.rssi} dBm',
-                    style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
-                  ),
-                  trailing: isSelected
-                      ? Icon(Icons.check_circle_rounded,
-                          color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
-                      : Icon(Icons.circle_outlined, color: borderCol),
                 ),
-              );
-            },
+                ...smartNodes.map((node) => _buildDeviceCard(node, isDark, textPrim, textSec, borderCol, bgElevated, primaryAccent)),
+              ],
+
+              if (otherNodes.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 14, bottom: 6),
+                  child: Text(
+                    'OTHER DETECTED BLUETOOTH DEVICES',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: textSec,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ),
+                ...otherNodes.map((node) => _buildDeviceCard(node, isDark, textPrim, textSec, borderCol, bgElevated, primaryAccent)),
+              ],
+            ],
           ),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
           height: 52,
@@ -582,17 +768,195 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                 ? null
                 : () => setState(() => _currentStep = 1),
             style: ElevatedButton.styleFrom(
-              backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+              backgroundColor: primaryAccent,
               foregroundColor: isDark ? Colors.black : Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              disabledBackgroundColor: borderCol,
             ),
             child: Text(
-              'Continue to Wi-Fi Setup',
-              style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700),
+              _selectedNode != null ? 'Continue to Wi-Fi Setup →' : 'Select a Device Above',
+              style: GoogleFonts.plusJakartaSans(fontSize: 14.5, fontWeight: FontWeight.w700),
             ),
           ),
         ),
+        const SizedBox(height: 10),
       ],
+    );
+  }
+
+  Widget _buildDeviceCard(
+    BleDiscoveredNode node,
+    bool isDark,
+    Color textPrim,
+    Color textSec,
+    Color borderCol,
+    Color bgElevated,
+    Color primaryAccent,
+  ) {
+    final isSelected = _selectedNode?.macAddress == node.macAddress;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        onTap: () => setState(() => _selectedNode = node),
+        borderRadius: BorderRadius.circular(18),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? (isDark ? AppColors.cyanGlow : const Color(0x182563EB))
+                : bgElevated,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isSelected ? primaryAccent : borderCol,
+              width: isSelected ? 2 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: primaryAccent.withValues(alpha: 0.2),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            children: [
+              // Controller Icon with Signal Badge
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? primaryAccent.withValues(alpha: 0.15)
+                      : (isDark ? AppColors.darkSurface : AppColors.lightSurface),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  node.isSmartPumpCandidate
+                      ? Icons.sensors_rounded
+                      : Icons.bluetooth_rounded,
+                  color: isSelected ? primaryAccent : textSec,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 14),
+
+              // Device Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            node.name,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: textPrim,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (node.isSmartPumpCandidate) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.emeraldSuccess.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              'READY',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.emeraldSuccess,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Text(
+                          'MAC: ${node.macAddress}',
+                          style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
+                        ),
+                        const SizedBox(width: 8),
+                        Text('•', style: TextStyle(color: textSec, fontSize: 10)),
+                        const SizedBox(width: 8),
+                        _buildSignalBars(node.rssi, primaryAccent, textSec),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${node.rssi} dBm',
+                          style: GoogleFonts.plusJakartaSans(fontSize: 10.5, color: textSec),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Radio Checkmark
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isSelected ? primaryAccent : Colors.transparent,
+                  border: Border.all(
+                    color: isSelected ? primaryAccent : borderCol,
+                    width: 2,
+                  ),
+                ),
+                child: isSelected
+                    ? Icon(
+                        Icons.check,
+                        size: 14,
+                        color: isDark ? Colors.black : Colors.white,
+                      )
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSignalBars(int rssi, Color primaryAccent, Color textSec) {
+    int activeBars = 1;
+    if (rssi >= -65) {
+      activeBars = 4;
+    } else if (rssi >= -75) {
+      activeBars = 3;
+    } else if (rssi >= -85) {
+      activeBars = 2;
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: List.generate(4, (i) {
+        final height = 4.0 + (i * 2.5);
+        final isActive = i < activeBars;
+        return Container(
+          width: 2.5,
+          height: height,
+          margin: const EdgeInsets.only(right: 1.5),
+          decoration: BoxDecoration(
+            color: isActive ? AppColors.emeraldSuccess : textSec.withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(1),
+          ),
+        );
+      }),
     );
   }
 
@@ -601,27 +965,27 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 18,
-          height: 18,
-          decoration: const BoxDecoration(
-            color: Color(0x2238BDF8),
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            color: AppColors.cyanPrimary.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
           alignment: Alignment.center,
           child: Text(
             num,
             style: GoogleFonts.plusJakartaSans(
-              fontSize: 10,
+              fontSize: 10.5,
               fontWeight: FontWeight.w800,
               color: AppColors.cyanPrimary,
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 10),
         Expanded(
           child: Text(
             text,
-            style: GoogleFonts.plusJakartaSans(fontSize: 11.5, color: textSec, height: 1.4),
+            style: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec, height: 1.4),
           ),
         ),
       ],
@@ -631,6 +995,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
   /// STEP 1: WI-FI SETUP FORM
   Widget _buildWifiStep(bool isDark, Color textPrim, Color textSec, Color borderCol) {
     final bgElevated = isDark ? AppColors.darkElevated : AppColors.lightElevated;
+    final primaryAccent = isDark ? AppColors.cyanPrimary : AppColors.blueElectric;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -639,25 +1004,31 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
         children: [
           // Selected Node Banner
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: bgElevated,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(color: borderCol),
             ),
             child: Row(
               children: [
-                Icon(Icons.memory_rounded,
-                    color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric, size: 20),
-                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: primaryAccent.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.memory_rounded, color: primaryAccent, size: 20),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _selectedNode?.name ?? 'SmartPump Node',
+                        _selectedNode?.name ?? 'Smart Controller Hub',
                         style: GoogleFonts.plusJakartaSans(
-                          fontSize: 13,
+                          fontSize: 13.5,
                           fontWeight: FontWeight.w700,
                           color: textPrim,
                         ),
@@ -671,7 +1042,14 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                 ),
                 TextButton(
                   onPressed: () => setState(() => _currentStep = 0),
-                  child: Text('Change', style: GoogleFonts.plusJakartaSans(fontSize: 12)),
+                  child: Text(
+                    'Change',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: primaryAccent,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -680,14 +1058,18 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
 
           Text(
             'Enter Local Wi-Fi Credentials',
-            style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: textPrim),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: textPrim,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
-            'The credentials will be pushed securely over encrypted BLE to the ESP32.',
+            'The credentials will be transmitted securely over encrypted Bluetooth to the Smart Controller.',
             style: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
 
           // SSID Field
           TextField(
@@ -697,6 +1079,20 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
               labelText: 'Wi-Fi Network Name (SSID)',
               hintText: 'e.g. MyHome_2.4G',
               prefixIcon: Icon(Icons.wifi_rounded, color: textSec, size: 20),
+              filled: true,
+              fillColor: bgElevated,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: borderCol),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: borderCol),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: primaryAccent, width: 2),
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -718,23 +1114,50 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                 ),
                 onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
               ),
+              filled: true,
+              fillColor: bgElevated,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: borderCol),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: borderCol),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: primaryAccent, width: 2),
+              ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
 
-          Row(
-            children: [
-              Icon(Icons.info_outline_rounded, size: 14, color: textSec),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Note: ESP32 hardware requires 2.4 GHz Wi-Fi band support.',
-                  style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
+          // 2.4 GHz Callout
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: primaryAccent.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: primaryAccent.withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.wifi_tethering_rounded, size: 18, color: primaryAccent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Smart Controller requires a 2.4 GHz Wi-Fi band. (5 GHz only networks are not supported by IoT controllers).',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11.5,
+                      color: textPrim,
+                      height: 1.35,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
 
           // Submit & Push
           SizedBox(
@@ -743,24 +1166,27 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
             child: ElevatedButton(
               onPressed: _beginWifiPushAndVerification,
               style: ElevatedButton.styleFrom(
-                backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                backgroundColor: primaryAccent,
                 foregroundColor: isDark ? Colors.black : Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
               child: Text(
-                'Push Credentials & Connect Node',
+                'Transmit Wi-Fi to Controller →',
                 style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700),
               ),
             ),
           ),
+          const SizedBox(height: 14),
         ],
       ),
     );
   }
 
-  /// STEP 2: CONNECTING INTERFACE STAGE (Multi-Stage Live Verification)
+  /// STEP 2: CONNECTING STAGE (Multi-Stage Live Verification)
   Widget _buildConnectingStageStep(bool isDark, Color textPrim, Color textSec, Color borderCol) {
     final isFailed = _connectionStage == ConnectionStage.failed;
+    final primaryAccent = isDark ? AppColors.cyanPrimary : AppColors.blueElectric;
+    final bgElevated = isDark ? AppColors.darkElevated : AppColors.lightElevated;
 
     return Center(
       child: Column(
@@ -768,90 +1194,98 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
         children: [
           if (isFailed)
             Container(
-              width: 80,
-              height: 80,
+              width: 88,
+              height: 88,
               decoration: const BoxDecoration(
                 color: AppColors.crimsonGlow,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.error_outline_rounded,
-                  color: AppColors.crimsonError, size: 44),
+              child: const Icon(Icons.error_outline_rounded,
+                  color: AppColors.crimsonError, size: 46),
             )
           else
             Stack(
               alignment: Alignment.center,
               children: [
                 SizedBox(
-                  width: 88,
-                  height: 88,
+                  width: 92,
+                  height: 92,
                   child: CircularProgressIndicator(
-                    strokeWidth: 3,
-                    color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                    strokeWidth: 3.5,
+                    color: primaryAccent,
                   ),
                 ),
                 Icon(
                   Icons.sensors_rounded,
-                  color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                  size: 40,
+                  color: primaryAccent,
+                  size: 42,
                 ),
               ],
             ),
           const SizedBox(height: 24),
 
           Text(
-            isFailed ? 'Hardware Connection Failed' : 'Connecting Interface Stage',
+            isFailed ? 'Connection Encountered An Error' : 'Configuring Controller Link',
             style: GoogleFonts.plusJakartaSans(
-              fontSize: 18,
+              fontSize: 18.5,
               fontWeight: FontWeight.w800,
               color: textPrim,
+              letterSpacing: -0.3,
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            isFailed ? (_connectionError ?? 'Unknown connection error') : _connectionStatusMessage,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 13,
-              color: isFailed ? AppColors.crimsonError : textSec,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              isFailed ? (_connectionError ?? 'Unknown connection error') : _connectionStatusMessage,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                color: isFailed ? AppColors.crimsonError : textSec,
+                height: 1.4,
+              ),
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 26),
 
           // 3-Stage Progress Timeline
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: isDark ? AppColors.darkElevated : AppColors.lightElevated,
-              borderRadius: BorderRadius.circular(16),
+              color: bgElevated,
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(color: borderCol),
             ),
             child: Column(
               children: [
                 _buildStageRow(
-                  title: '1. Pushing Wi-Fi credentials via BLE',
+                  title: '1. Transmitting credentials over Bluetooth',
                   isDone: _connectionStage.index > ConnectionStage.transmittingWifi.index,
                   isActive: _connectionStage == ConnectionStage.transmittingWifi,
                   isDark: isDark,
                   textPrim: textPrim,
                   textSec: textSec,
+                  primaryAccent: primaryAccent,
                 ),
-                const Divider(height: 20),
+                const Divider(height: 22),
                 _buildStageRow(
-                  title: '2. ESP32 connecting to Wi-Fi router',
+                  title: '2. Controller connecting to 2.4 GHz Wi-Fi',
                   isDone: _connectionStage.index > ConnectionStage.routerHandshake.index,
                   isActive: _connectionStage == ConnectionStage.routerHandshake,
                   isDark: isDark,
                   textPrim: textPrim,
                   textSec: textSec,
+                  primaryAccent: primaryAccent,
                 ),
-                const Divider(height: 20),
+                const Divider(height: 22),
                 _buildStageRow(
-                  title: '3. MQTT TLS cloud handshake & User ID claim',
+                  title: '3. Cloud MQTT handshake & User binding',
                   isDone: _connectionStage.index > ConnectionStage.cloudVerification.index,
                   isActive: _connectionStage == ConnectionStage.cloudVerification,
                   isDark: isDark,
                   textPrim: textPrim,
                   textSec: textSec,
+                  primaryAccent: primaryAccent,
                 ),
               ],
             ),
@@ -862,7 +1296,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
           if (isFailed)
             SizedBox(
               width: double.infinity,
-              height: 50,
+              height: 52,
               child: ElevatedButton.icon(
                 onPressed: () => setState(() => _currentStep = 1),
                 icon: const Icon(Icons.arrow_back_rounded, size: 18),
@@ -871,12 +1305,13 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                   style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                  backgroundColor: primaryAccent,
                   foregroundColor: isDark ? Colors.black : Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
               ),
             ),
+          const SizedBox(height: 12),
         ],
       ),
     );
@@ -889,21 +1324,22 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
     required bool isDark,
     required Color textPrim,
     required Color textSec,
+    required Color primaryAccent,
   }) {
     Widget icon;
     if (isDone) {
-      icon = const Icon(Icons.check_circle_rounded, color: AppColors.emeraldSuccess, size: 20);
+      icon = const Icon(Icons.check_circle_rounded, color: AppColors.emeraldSuccess, size: 22);
     } else if (isActive) {
       icon = SizedBox(
         width: 18,
         height: 18,
         child: CircularProgressIndicator(
           strokeWidth: 2,
-          color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+          color: primaryAccent,
         ),
       );
     } else {
-      icon = const Icon(Icons.radio_button_unchecked_rounded, color: Colors.grey, size: 20);
+      icon = Icon(Icons.radio_button_unchecked_rounded, color: textSec.withValues(alpha: 0.4), size: 22);
     }
 
     return Row(
@@ -914,7 +1350,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
           child: Text(
             title,
             style: GoogleFonts.plusJakartaSans(
-              fontSize: 12.5,
+              fontSize: 13,
               fontWeight: isActive || isDone ? FontWeight.w700 : FontWeight.w500,
               color: isDone ? AppColors.emeraldSuccess : (isActive ? textPrim : textSec),
             ),
@@ -924,44 +1360,48 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
     );
   }
 
-  /// STEP 3: ONLY SHOWN WHEN REALLY CONNECTED & VERIFIED
+  /// STEP 3: CONTROLLER VERIFIED & ONLINE
   Widget _buildConnectedStep(bool isDark, Color textPrim, Color textSec, Color borderCol) {
+    final bgElevated = isDark ? AppColors.darkElevated : AppColors.lightElevated;
+    final primaryAccent = isDark ? AppColors.cyanPrimary : AppColors.blueElectric;
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 84,
-            height: 84,
+            width: 88,
+            height: 88,
             decoration: const BoxDecoration(
               color: AppColors.emeraldGlow,
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.check_rounded, color: AppColors.emeraldSuccess, size: 48),
+            child: const Icon(Icons.check_circle_rounded, color: AppColors.emeraldSuccess, size: 52),
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 20),
 
           Text(
-            'Node Connected & Verified ✓',
+            'Smart Controller Online ✓',
             style: GoogleFonts.plusJakartaSans(
               fontSize: 22,
               fontWeight: FontWeight.w800,
               color: textPrim,
+              letterSpacing: -0.4,
             ),
           ),
           const SizedBox(height: 6),
           Text(
-            'ESP32 Main Gateway is online and cryptographically bound to your User ID.',
+            'Smart Pump Gateway is active and securely bound to your User ID.',
             textAlign: TextAlign.center,
             style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec),
           ),
           const SizedBox(height: 24),
 
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             decoration: BoxDecoration(
-              color: isDark ? AppColors.darkElevated : AppColors.lightElevated,
-              borderRadius: BorderRadius.circular(16),
+              color: bgElevated,
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(color: borderCol),
             ),
             child: Column(
@@ -969,27 +1409,43 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Node Serial:', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec)),
-                    Text(_selectedNode?.name ?? 'SmartPump-ESP32',
-                        style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700, color: textPrim)),
+                    Text('Controller Hub:', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec)),
+                    Text(
+                      _selectedNode?.name ?? 'SmartPump Controller',
+                      style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700, color: textPrim),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('Status:', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec)),
-                    Text('● Cloud Verified',
-                        style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.emeraldSuccess)),
+                    Row(
+                      children: [
+                        const Icon(Icons.circle, color: AppColors.emeraldSuccess, size: 8),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Cloud Verified & Linked',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.emeraldSuccess,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('User Isolation:', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec)),
-                    Text('Strict Single-Tenant Locked',
-                        style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.cyanPrimary)),
+                    Text('Ownership:', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec)),
+                    Text(
+                      'Dedicated Single-Tenant',
+                      style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: primaryAccent),
+                    ),
                   ],
                 ),
               ],
@@ -998,7 +1454,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
 
           const Spacer(),
 
-          // Immediate Transition to Tank Setup
+          // Transition to Tank Setup
           SizedBox(
             width: double.infinity,
             height: 52,
@@ -1006,24 +1462,26 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
               onPressed: () => setState(() => _currentStep = 4),
               icon: const Icon(Icons.water_rounded, size: 20),
               label: Text(
-                'Configure Tank Setup →',
+                'Configure Tank & Pump Setup →',
                 style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                backgroundColor: primaryAccent,
                 foregroundColor: isDark ? Colors.black : Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
             ),
           ),
+          const SizedBox(height: 12),
         ],
       ),
     );
   }
 
-  /// STEP 4: TANK SETUP INTERFACE (Kind of tank, Liters capacity, Depth, Motor HP)
+  /// STEP 4: TANK SETUP INTERFACE
   Widget _buildTankSetupStep(bool isDark, Color textPrim, Color textSec, Color borderCol) {
     final bgElevated = isDark ? AppColors.darkElevated : AppColors.lightElevated;
+    final primaryAccent = isDark ? AppColors.cyanPrimary : AppColors.blueElectric;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -1031,27 +1489,32 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Tank & Motor Configuration',
-            style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w800, color: textPrim),
+            'Tank & Pump Calibration',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 17.5,
+              fontWeight: FontWeight.w800,
+              color: textPrim,
+              letterSpacing: -0.3,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
-            'Specify your water storage specifications for accurate ultrasonic level calculations and dry-run cutoffs.',
-            style: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
+            'Specify your storage tank dimensions for precision acoustic level calculations and safety interlocks.',
+            style: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec, height: 1.35),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
 
           // 1. Kind / Type of Tank
           Text(
-            'Kind of Tank:',
+            'Storage Tank Type:',
             style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700, color: textPrim),
           ),
           const SizedBox(height: 8),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
               color: bgElevated,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: borderCol),
             ),
             child: DropdownButtonHideUnderline(
@@ -1099,7 +1562,8 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                       });
                     }
                   },
-                  selectedColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                  selectedColor: primaryAccent,
+                  backgroundColor: bgElevated,
                   labelStyle: GoogleFonts.plusJakartaSans(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -1115,7 +1579,8 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                 onSelected: (selected) {
                   setState(() => _isCustomCapacity = selected);
                 },
-                selectedColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                selectedColor: primaryAccent,
+                backgroundColor: bgElevated,
                 labelStyle: GoogleFonts.plusJakartaSans(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -1138,12 +1603,18 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                 hintText: 'e.g. 750 or 2500',
                 suffixText: 'Liters',
                 prefixIcon: Icon(Icons.water_drop_outlined, color: textSec, size: 20),
+                filled: true,
+                fillColor: bgElevated,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: borderCol),
+                ),
               ),
             ),
           ],
           const SizedBox(height: 18),
 
-          // 3. Tank Height / Depth (cm)
+          // 3. Tank Height / Depth
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1162,14 +1633,14 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
             min: 50.0,
             max: 400.0,
             divisions: 35,
-            activeColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+            activeColor: primaryAccent,
             onChanged: (val) => setState(() => _tankDepthCm = val),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
 
-          // 4. Motor HP Rating & Details
+          // 4. Motor HP Rating
           Text(
-            'Pump Motor Power:',
+            'Pump Motor Rating:',
             style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700, color: textPrim),
           ),
           const SizedBox(height: 8),
@@ -1181,19 +1652,15 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                   padding: const EdgeInsets.symmetric(horizontal: 3),
                   child: InkWell(
                     onTap: () => setState(() => _motorHp = hp),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: isSelected
-                            ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
-                            : bgElevated,
-                        borderRadius: BorderRadius.circular(10),
+                        color: isSelected ? primaryAccent : bgElevated,
+                        borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isSelected
-                              ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
-                              : borderCol,
+                          color: isSelected ? primaryAccent : borderCol,
                         ),
                       ),
                       child: Text(
@@ -1221,10 +1688,10 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
           ),
           const SizedBox(height: 8),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
               color: bgElevated,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: borderCol),
             ),
             child: DropdownButtonHideUnderline(
@@ -1248,10 +1715,10 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
 
           // Dry Run Cut-off Toggle
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: bgElevated,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: borderCol),
             ),
             child: Row(
@@ -1264,38 +1731,39 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                       Text(
                         'Dry-Run Safety Interlock',
                         style: GoogleFonts.plusJakartaSans(
-                          fontSize: 12.5,
+                          fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: textPrim,
                         ),
                       ),
+                      const SizedBox(height: 2),
                       Text(
-                        'Stops motor if flow < 1.0 LPM for 30s to prevent burn-out',
-                        style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
+                        'Auto-cuts motor power if flow < 1.0 LPM for 30s to prevent pump burn-out.',
+                        style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec, height: 1.3),
                       ),
                     ],
                   ),
                 ),
                 Switch(
                   value: _dryRunProtection,
-                  activeColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                  activeThumbColor: primaryAccent,
                   onChanged: (val) => setState(() => _dryRunProtection = val),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 26),
 
-          // Finish Setup & Save
+          // Save & Launch
           SizedBox(
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
               onPressed: _isSavingTankConfig ? null : _finalizeTankSetupAndClaim,
               style: ElevatedButton.styleFrom(
-                backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                backgroundColor: primaryAccent,
                 foregroundColor: isDark ? Colors.black : Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
               child: _isSavingTankConfig
                   ? const SizedBox(
@@ -1309,7 +1777,7 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog> {
                     ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
         ],
       ),
     );

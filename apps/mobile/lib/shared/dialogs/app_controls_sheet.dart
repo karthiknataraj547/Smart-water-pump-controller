@@ -117,7 +117,7 @@ void showAppControlsBottomSheet(BuildContext context, WidgetRef ref) {
                 style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: textPrim),
               ),
               subtitle: Text(
-                'Pair & provision an ESP32 hardware node',
+                'Pair & provision a Smart Controller node',
                 style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
               ),
               onTap: () {
@@ -149,7 +149,7 @@ void showAppControlsBottomSheet(BuildContext context, WidgetRef ref) {
                   style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.crimsonError),
                 ),
                 subtitle: Text(
-                  'Unpair ESP32 gateway and return to empty view',
+                  'Unpair Smart Controller and return to empty view',
                   style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
                 ),
                 onTap: () {

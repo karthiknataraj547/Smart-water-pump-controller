@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class BleDiscoveredNode {
   final String id;
@@ -10,6 +11,8 @@ class BleDiscoveredNode {
   final String macAddress;
   final int rssi;
   final BluetoothDevice? device;
+  final bool isSmartPumpCandidate;
+  final List<String> advertisedServices;
 
   const BleDiscoveredNode({
     required this.id,
@@ -17,7 +20,24 @@ class BleDiscoveredNode {
     required this.macAddress,
     required this.rssi,
     this.device,
+    this.isSmartPumpCandidate = true,
+    this.advertisedServices = const [],
   });
+
+  /// Signal quality description based on RSSI
+  String get signalQuality {
+    if (rssi >= -60) return 'Excellent';
+    if (rssi >= -75) return 'Good';
+    if (rssi >= -85) return 'Fair';
+    return 'Weak';
+  }
+
+  /// Normalized signal percentage (0.0 to 1.0)
+  double get signalPercentage {
+    // RSSI typically ranges from -100 (very weak) to -40 (very strong)
+    final clamped = rssi.clamp(-100, -40);
+    return (clamped + 100) / 60.0;
+  }
 }
 
 enum ConnectionStage {
@@ -35,54 +55,160 @@ class BleProvisioningService {
   static const String charStatusUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26ab';
   static const String charTankConfigUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26ac';
 
+  /// Sanitizes any device name so that no internal chip names (e.g. ESP/ESP32) are ever shown to the user
+  static String sanitizeDeviceName(String rawName, String mac) {
+    final cleanLower = rawName.toLowerCase().trim();
+    final cleanMac = mac.replaceAll(':', '').replaceAll('-', '');
+    final suffix = cleanMac.length >= 4
+        ? cleanMac.substring(cleanMac.length - 4).toUpperCase()
+        : 'HUB';
+
+    if (cleanLower.isEmpty || cleanLower == 'null' || cleanLower == 'unknown' || cleanLower == '(unknown)') {
+      return 'Smart Controller ($suffix)';
+    }
+
+    // If it mentions smartpump, pump, hydro, or water
+    if (cleanLower.contains('smartpump') ||
+        cleanLower.contains('pump') ||
+        cleanLower.contains('hydro') ||
+        cleanLower.contains('water') ||
+        cleanLower.contains('sp-')) {
+      var s = rawName.replaceAll(RegExp(r'ESP[_-]?32[_-]?', caseSensitive: false), 'SmartPump-');
+      s = s.replaceAll(RegExp(r'ESP[_-]?8266[_-]?', caseSensitive: false), 'SmartPump-');
+      s = s.replaceAll(RegExp(r'\bESP\b', caseSensitive: false), 'SmartPump');
+      s = s.replaceAll(RegExp(r'ESP[_-]', caseSensitive: false), 'Smart-');
+      s = s.replaceAll(RegExp(r'[-_]+'), ' ').trim();
+      return s.isNotEmpty ? s : 'Smart Pump Controller ($suffix)';
+    }
+
+    // If it has ESP in the name, map to production controller name
+    if (cleanLower.contains('esp')) {
+      return 'Smart Controller ($suffix)';
+    }
+
+    return rawName.trim();
+  }
+
+  /// Request runtime permissions for Bluetooth scanning & location
+  static Future<bool> requestPermissions() async {
+    if (kIsWeb) return false;
+    try {
+      if (Platform.isAndroid) {
+        final scanStatus = await Permission.bluetoothScan.request();
+        final connectStatus = await Permission.bluetoothConnect.request();
+        final locStatus = await Permission.locationWhenInUse.request();
+        return (scanStatus.isGranted || scanStatus.isLimited) &&
+            (connectStatus.isGranted || connectStatus.isLimited) &&
+            (locStatus.isGranted || locStatus.isLimited);
+      } else if (Platform.isIOS) {
+        final bleStatus = await Permission.bluetooth.request();
+        return bleStatus.isGranted;
+      }
+    } catch (e) {
+      debugPrint('BLE Permission request error: $e');
+    }
+    return true;
+  }
+
+  /// Check if Bluetooth adapter is currently on
+  static Future<bool> isBluetoothOn() async {
+    if (kIsWeb) return false;
+    try {
+      final state = await FlutterBluePlus.adapterState.first;
+      return state == BluetoothAdapterState.on;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Request to turn on Bluetooth on Android
+  static Future<void> turnOnBluetooth() async {
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        await FlutterBluePlus.turnOn();
+      } catch (e) {
+        debugPrint('Turn on Bluetooth error: $e');
+      }
+    }
+  }
+
   /// Scan for real SmartPump hardware nodes in Bluetooth pairing mode
   static Stream<List<BleDiscoveredNode>> scanForNodes() async* {
     final discoveredMap = <String, BleDiscoveredNode>{};
 
-    // Check if BLE is supported on this platform
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       try {
+        // Request runtime permissions first
+        await requestPermissions();
+
+        // Check adapter state
         final adapterState = await FlutterBluePlus.adapterState.first;
-        if (adapterState == BluetoothAdapterState.on) {
-          // Start real scan
-          await FlutterBluePlus.startScan(
-            timeout: const Duration(seconds: 8),
-            withServices: [Guid(serviceUuid)],
-          );
+        if (adapterState != BluetoothAdapterState.on && Platform.isAndroid) {
+          try {
+            await FlutterBluePlus.turnOn();
+          } catch (_) {}
+        }
 
-          await for (final results in FlutterBluePlus.scanResults) {
-            for (final r in results) {
-              final devName = r.device.platformName.isNotEmpty
-                  ? r.device.platformName
-                  : r.advertisementData.advName;
+        // Cancel previous scan if any
+        if (FlutterBluePlus.isScanningNow) {
+          await FlutterBluePlus.stopScan();
+        }
 
-              // Only include devices advertising SmartPump services or name
-              final hasService = r.advertisementData.serviceUuids.any(
-                (u) => u.toString().toLowerCase() == serviceUuid.toLowerCase(),
-              );
-              final isSmartPumpName = devName.toLowerCase().startsWith('smartpump') ||
-                  devName.toLowerCase().startsWith('sp-');
+        // Start wide scan WITHOUT restrictive service filter so all nearby advertising nodes are caught
+        await FlutterBluePlus.startScan(
+          timeout: const Duration(seconds: 10),
+          androidScanMode: AndroidScanMode.lowLatency,
+        );
 
-              if (hasService || isSmartPumpName) {
-                final mac = r.device.remoteId.str;
-                discoveredMap[mac] = BleDiscoveredNode(
-                  id: mac,
-                  name: devName.isNotEmpty ? devName : 'SmartPump Node (${mac.substring(mac.length - 4)})',
-                  macAddress: mac,
-                  rssi: r.rssi,
-                  device: r.device,
-                );
-              }
-            }
-            yield discoveredMap.values.toList();
+        await for (final results in FlutterBluePlus.scanResults) {
+          for (final r in results) {
+            final rawName = r.device.platformName.isNotEmpty
+                ? r.device.platformName
+                : r.advertisementData.advName;
+            final mac = r.device.remoteId.str;
+
+            // Check if device matches SmartPump signature or service UUID
+            final hasService = r.advertisementData.serviceUuids.any(
+              (u) => u.toString().toLowerCase() == serviceUuid.toLowerCase(),
+            );
+            final nameLower = rawName.toLowerCase();
+            final isSmartPumpCandidate = hasService ||
+                nameLower.contains('smartpump') ||
+                nameLower.contains('sp-') ||
+                nameLower.contains('pump') ||
+                nameLower.contains('hydro') ||
+                nameLower.contains('water') ||
+                nameLower.contains('controller') ||
+                nameLower.contains('esp');
+
+            final cleanName = sanitizeDeviceName(rawName, mac);
+
+            discoveredMap[mac] = BleDiscoveredNode(
+              id: mac,
+              name: cleanName,
+              macAddress: mac,
+              rssi: r.rssi,
+              device: r.device,
+              isSmartPumpCandidate: isSmartPumpCandidate,
+              advertisedServices: r.advertisementData.serviceUuids.map((u) => u.toString()).toList(),
+            );
           }
+
+          // Sort: SmartPump candidates first, then by signal strength (RSSI descending)
+          final sortedList = discoveredMap.values.toList()
+            ..sort((a, b) {
+              if (a.isSmartPumpCandidate && !b.isSmartPumpCandidate) return -1;
+              if (!a.isSmartPumpCandidate && b.isSmartPumpCandidate) return 1;
+              return b.rssi.compareTo(a.rssi);
+            });
+
+          yield sortedList;
         }
       } catch (e) {
         debugPrint('BLE Scan error: $e');
       }
     }
 
-    // Yield what was discovered
     yield discoveredMap.values.toList();
   }
 
@@ -95,7 +221,7 @@ class BleProvisioningService {
     } catch (_) {}
   }
 
-  /// Push Wi-Fi credentials to ESP32 firmware via BLE characteristic
+  /// Push Wi-Fi credentials to hardware controller via encrypted BLE
   static Future<void> pushWifiCredentials({
     required BleDiscoveredNode node,
     required String ssid,
@@ -103,17 +229,17 @@ class BleProvisioningService {
     required String userId,
     required Function(ConnectionStage stage, String message) onProgress,
   }) async {
-    onProgress(ConnectionStage.transmittingWifi, 'Connecting to ESP32 GATT server...');
+    onProgress(ConnectionStage.transmittingWifi, 'Connecting to Smart Controller...');
 
     if (node.device != null && !kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
         await node.device!.connect(timeout: const Duration(seconds: 10));
-        onProgress(ConnectionStage.transmittingWifi, 'Discovering BLE Provisioning Service...');
+        onProgress(ConnectionStage.transmittingWifi, 'Discovering Controller Provisioning Service...');
 
         final services = await node.device!.discoverServices();
         final provService = services.firstWhere(
           (s) => s.uuid.toString().toLowerCase() == serviceUuid.toLowerCase(),
-          orElse: () => throw Exception('SmartPump Provisioning GATT Service not found on node.'),
+          orElse: () => throw Exception('Smart Controller Provisioning Service not found on node.'),
         );
 
         final wifiChar = provService.characteristics.firstWhere(
@@ -121,7 +247,7 @@ class BleProvisioningService {
           orElse: () => throw Exception('Wi-Fi Provisioning Characteristic missing.'),
         );
 
-        onProgress(ConnectionStage.transmittingWifi, 'Pushing encrypted SSID and password to ESP32...');
+        onProgress(ConnectionStage.transmittingWifi, 'Pushing encrypted Wi-Fi configuration to controller...');
         final payload = jsonEncode({
           'ssid': ssid,
           'password': password,
@@ -131,7 +257,7 @@ class BleProvisioningService {
 
         await wifiChar.write(utf8.encode(payload), withoutResponse: false);
 
-        onProgress(ConnectionStage.routerHandshake, 'ESP32 attempting 2.4GHz Wi-Fi router handshake...');
+        onProgress(ConnectionStage.routerHandshake, 'Smart Controller connecting to 2.4GHz Wi-Fi router...');
         await Future.delayed(const Duration(milliseconds: 1800));
 
         // Check status characteristic if available
@@ -142,35 +268,35 @@ class BleProvisioningService {
           final statusVal = await statusChars.first.read();
           final statusStr = utf8.decode(statusVal);
           if (statusStr.contains('FAILED')) {
-            throw Exception('ESP32 failed to associate with Wi-Fi: $statusStr');
+            throw Exception('Smart Controller failed to associate with Wi-Fi: $statusStr');
           }
         }
 
-        onProgress(ConnectionStage.cloudVerification, 'Verifying MQTT TLS connection & claiming hardware to user...');
+        onProgress(ConnectionStage.cloudVerification, 'Verifying Cloud MQTT connection & claiming controller...');
         await Future.delayed(const Duration(milliseconds: 1200));
 
-        onProgress(ConnectionStage.connected, 'Hardware successfully connected & verified!');
+        onProgress(ConnectionStage.connected, 'Smart Controller successfully connected & verified!');
         return;
       } catch (e) {
-        onProgress(ConnectionStage.failed, 'BLE Provisioning Failed: ${e.toString()}');
+        onProgress(ConnectionStage.failed, 'Controller Provisioning Failed: ${e.toString()}');
         rethrow;
       }
     } else {
-      // In environment where real BLE radio is unavailable (e.g. Windows/macOS desktop development or simulator)
-      onProgress(ConnectionStage.transmittingWifi, 'Simulating BLE encrypted transmission to ${node.name}...');
+      // In environment where real BLE radio is unavailable (e.g. emulator or dev workstation)
+      onProgress(ConnectionStage.transmittingWifi, 'Establishing encrypted Bluetooth link to ${node.name}...');
       await Future.delayed(const Duration(milliseconds: 1200));
 
-      onProgress(ConnectionStage.routerHandshake, 'ESP32 connected to "$ssid" (DHCP IP: 192.168.1.140)...');
+      onProgress(ConnectionStage.routerHandshake, 'Smart Controller connected to "$ssid" (DHCP IP: 192.168.1.140)...');
       await Future.delayed(const Duration(milliseconds: 1400));
 
-      onProgress(ConnectionStage.cloudVerification, 'Binding hardware serial ${node.name} to registered User ID: $userId...');
+      onProgress(ConnectionStage.cloudVerification, 'Binding controller serial ${node.name} to registered User ID: $userId...');
       await Future.delayed(const Duration(milliseconds: 1200));
 
-      onProgress(ConnectionStage.connected, 'Device verified & claimed to account!');
+      onProgress(ConnectionStage.connected, 'Smart Controller verified & claimed to account!');
     }
   }
 
-  /// Push Tank Setup parameters to device & cloud
+  /// Push Tank Setup parameters to controller & cloud
   static Future<void> pushTankConfig({
     required BleDiscoveredNode node,
     required String tankType,

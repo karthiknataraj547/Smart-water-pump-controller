@@ -130,7 +130,7 @@ class DashboardScreen extends ConsumerWidget {
                     ),
                     Switch(
                       value: isEnabled,
-                      activeColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                      activeThumbColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
                       onChanged: (val) {
                         setSheetState(() => isEnabled = val);
                       },
