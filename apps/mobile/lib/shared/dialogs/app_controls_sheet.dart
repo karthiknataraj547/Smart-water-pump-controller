@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_provider.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/pump/pump_provider.dart';
 import '../../features/provisioning/presentation/ble_provisioning_dialog.dart';
 
 void showAppControlsBottomSheet(BuildContext context, WidgetRef ref) {
@@ -135,7 +136,69 @@ void showAppControlsBottomSheet(BuildContext context, WidgetRef ref) {
               },
             ),
           ),
-          Divider(color: borderCol),
+          // Reboot Smart Controller Node
+          if (authState.hasClaimedHardware) ...[
+            Material(
+              color: Colors.transparent,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.restart_alt_rounded, color: AppColors.cyanPrimary),
+                title: Text(
+                  'Reboot Smart Controller',
+                  style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: textPrim),
+                ),
+                subtitle: Text(
+                  'Restart hardware main gateway node remotely',
+                  style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  showDialog(
+                    context: context,
+                    builder: (dctx) => AlertDialog(
+                      backgroundColor: bgSurface,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      title: Row(
+                        children: [
+                          const Icon(Icons.restart_alt_rounded, color: AppColors.cyanPrimary),
+                          const SizedBox(width: 10),
+                          Text('Reboot Controller?', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 16, color: textPrim)),
+                        ],
+                      ),
+                      content: Text(
+                        'This will send a remote restart command to the ESP32 main node. Relay coil will isolate and reconnect within seconds.',
+                        style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dctx),
+                          child: Text('Cancel', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, color: textSec)),
+                        ),
+                        ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(dctx);
+                            ref.read(pumpProvider.notifier).rebootHardware();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Reboot command dispatched to Smart Controller.'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.cyanPrimary,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: Text('Reboot Now', style: GoogleFonts.plusJakartaSans(color: Colors.black, fontWeight: FontWeight.w700)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            Divider(color: borderCol),
+          ],
 
           // Remove Device / Unpair Hardware
           if (authState.hasClaimedHardware) ...[

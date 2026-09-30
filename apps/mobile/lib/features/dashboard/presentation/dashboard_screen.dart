@@ -279,6 +279,39 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          // Manual Page Refresh Button
+          Container(
+            margin: const EdgeInsets.only(right: 6),
+            decoration: BoxDecoration(
+              color: bgSurface,
+              shape: BoxShape.circle,
+              border: Border.all(color: borderCol),
+            ),
+            child: IconButton(
+              tooltip: 'Refresh Hardware Telemetry',
+              onPressed: () async {
+                await ref.read(pumpProvider.notifier).fetchHardwareState();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Hardware telemetry refreshed',
+                        style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                      ),
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              icon: Icon(
+                Icons.refresh_rounded,
+                color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                size: 20,
+              ),
+            ),
+          ),
+
           // Theme Toggle Button (Light / Dark)
           Container(
             margin: const EdgeInsets.only(right: 6),
@@ -314,10 +347,16 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        child: Column(
+      body: RefreshIndicator(
+        color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+        backgroundColor: bgSurface,
+        onRefresh: () async {
+          await ref.read(pumpProvider.notifier).fetchHardwareState();
+        },
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Emergency Active Warning Banner
@@ -849,8 +888,9 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 // -------------------------------------------------------------

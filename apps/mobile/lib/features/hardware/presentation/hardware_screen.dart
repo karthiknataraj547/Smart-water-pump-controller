@@ -111,6 +111,43 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
           style: GoogleFonts.plusJakartaSans(color: textPrim, fontWeight: FontWeight.w800, fontSize: 20),
         ),
         actions: [
+          // Refresh Hardware State Button
+          Container(
+            margin: const EdgeInsets.only(right: 6),
+            decoration: BoxDecoration(
+              color: bgSurface,
+              shape: BoxShape.circle,
+              border: Border.all(color: borderCol),
+            ),
+            child: IconButton(
+              tooltip: 'Refresh Hardware Topology',
+              onPressed: () async {
+                await ref.read(pumpProvider.notifier).fetchHardwareState();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Hardware topology refreshed',
+                        style: GoogleFonts.plusJakartaSans(
+                          color: isDark ? Colors.black : Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                      backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              icon: Icon(
+                Icons.refresh_rounded,
+                color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                size: 20,
+              ),
+            ),
+          ),
           // Theme Toggle Button beside Settings
           Container(
             margin: const EdgeInsets.only(right: 6),
@@ -144,10 +181,16 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
           ),
         ],
       ),
-      body: ListView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        children: [
+      body: RefreshIndicator(
+        color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+        backgroundColor: bgSurface,
+        onRefresh: () async {
+          await ref.read(pumpProvider.notifier).fetchHardwareState();
+        },
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          children: [
           // === UNIFIED DUAL-NODE MESH CARD (MAIN NODE + SUB NODE IN ONE CARD) ===
           Container(
             decoration: BoxDecoration(
@@ -660,8 +703,9 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
           const SizedBox(height: 24),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class _DiagRow extends StatelessWidget {

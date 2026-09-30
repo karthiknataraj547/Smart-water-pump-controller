@@ -305,6 +305,43 @@ class _PumpControlScreenState extends ConsumerState<PumpControlScreen> {
           ],
         ),
         actions: [
+          // Refresh Hardware State Button
+          Container(
+            margin: const EdgeInsets.only(right: 6),
+            decoration: BoxDecoration(
+              color: bgSurface,
+              shape: BoxShape.circle,
+              border: Border.all(color: borderCol),
+            ),
+            child: IconButton(
+              tooltip: 'Refresh Hardware State',
+              onPressed: () async {
+                await ref.read(pumpProvider.notifier).fetchHardwareState();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Hardware state refreshed',
+                        style: GoogleFonts.plusJakartaSans(
+                          color: isDark ? Colors.black : Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                      backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              icon: Icon(
+                Icons.refresh_rounded,
+                color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                size: 20,
+              ),
+            ),
+          ),
           // Theme Toggle
           Container(
             margin: const EdgeInsets.only(right: 6),
@@ -339,10 +376,16 @@ class _PumpControlScreenState extends ConsumerState<PumpControlScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        child: Column(
+      body: RefreshIndicator(
+        color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+        backgroundColor: bgSurface,
+        onRefresh: () async {
+          await ref.read(pumpProvider.notifier).fetchHardwareState();
+        },
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Column(
           children: [
             // Emergency Lockout Active Banner
             if (pump.isEmergencyStopped) ...[
@@ -1210,8 +1253,9 @@ class _PumpControlScreenState extends ConsumerState<PumpControlScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 // -------------------------------------------------------------

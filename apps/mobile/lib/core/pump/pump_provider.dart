@@ -424,6 +424,18 @@ class PumpNotifier extends StateNotifier<PumpState> {
     }
   }
 
+  Future<void> rebootHardware() async {
+    if (state.hardwareId == null || state.hardwareId!.isEmpty) {
+      await fetchHardwareState();
+    }
+    final hwId = state.hardwareId;
+    if (hwId != null && hwId.isNotEmpty) {
+      await _apiClient.postWithFallback('/api/hardware/$hwId/reboot', {});
+    }
+    await Future.delayed(const Duration(milliseconds: 500));
+    await fetchHardwareState();
+  }
+
   void toggleRemoteAutoCutoff() {
     state = state.copyWith(isRemoteAutoCutoffEnabled: !state.isRemoteAutoCutoffEnabled);
   }

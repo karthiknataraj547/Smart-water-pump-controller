@@ -32,7 +32,8 @@
 
 // Pin Definitions
 #define RELAY_PIN 26
-#define BOOT_BUTTON_PIN 0
+#define BOOT_BUTTON_PIN 0        // ESP32 Inbuilt BOOT button (GPIO 0)
+#define EXTERNAL_RESET_PIN 4     // External tactile reset button (optional GPIO 4)
 #define DRY_RUN_FLOW_THRESHOLD 1.0 // Liters / minute
 
 // Status LED Pin Definitions
@@ -439,6 +440,33 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         ack["pumpState"] = "OFF";
         ack["relayPinActive"] = false;
     }
+    else if (strcmp(command, "REBOOT_DEVICE") == 0) {
+        ack["status"] = "SUCCESS";
+        ack["pumpState"] = "REBOOTING";
+        char ackBuffer[256];
+        serializeJson(ack, ackBuffer);
+        mqttClient.publish(ackTopic, ackBuffer, true);
+        delay(300);
+        digitalWrite(RELAY_PIN, LOW);
+        relayActive = false;
+        ESP.restart();
+        return;
+    }
+    else if (strcmp(command, "FACTORY_RESET") == 0) {
+        ack["status"] = "SUCCESS";
+        ack["pumpState"] = "RESETTING";
+        char ackBuffer[256];
+        serializeJson(ack, ackBuffer);
+        mqttClient.publish(ackTopic, ackBuffer, true);
+        delay(300);
+        digitalWrite(RELAY_PIN, LOW);
+        relayActive = false;
+        prefs.begin("smartpump", false);
+        prefs.clear();
+        prefs.end();
+        ESP.restart();
+        return;
+    }
 
     char ackBuffer[256];
     serializeJson(ack, ackBuffer);
@@ -486,6 +514,94 @@ void updateStatusLed() {
     }
 }
 
+// Hardware Reset Button Handler (Inbuilt BOOT GPIO 0 and External Reset GPIO 4)
+// Multi-Tier Press Detection:
+// - Short Press (< 3s): Soft reset / controller reboot (safely isolates relay, blinks LED, ESP.restart())
+// - Medium Press (3 - 7s): Trigger Bluetooth BLE Provisioning / Pairing Mode
+// - Long Press (>= 7s): Full Factory Reset (wipes saved NVS Wi-Fi credentials & tank configuration, flashes LED 5x, ESP.restart())
+void checkHardwareResetButton() {
+    bool bootPressed = (digitalRead(BOOT_BUTTON_PIN) == LOW);
+    bool extPressed = (digitalRead(EXTERNAL_RESET_PIN) == LOW);
+
+    if (bootPressed || extPressed) {
+        unsigned long pressStart = millis();
+        bool ledToggle = false;
+        unsigned long lastFeedbackToggle = 0;
+
+        Serial.println("[Button] Hardware reset button press detected. Evaluating hold duration...");
+
+        // Monitor button hold while keeping visual feedback active
+        while (digitalRead(BOOT_BUTTON_PIN) == LOW || digitalRead(EXTERNAL_RESET_PIN) == LOW) {
+            unsigned long duration = millis() - pressStart;
+
+            if (duration >= 7000) {
+                // Tier 3 visual cue: Ultra-fast 50ms strobe (Factory Reset armed!)
+                if (millis() - lastFeedbackToggle >= 50) {
+                    lastFeedbackToggle = millis();
+                    ledToggle = !ledToggle;
+                    writeStatusLed(ledToggle);
+                }
+            } else if (duration >= 3000) {
+                // Tier 2 visual cue: 150ms medium flash (BLE Provisioning armed!)
+                if (millis() - lastFeedbackToggle >= 150) {
+                    lastFeedbackToggle = millis();
+                    ledToggle = !ledToggle;
+                    writeStatusLed(ledToggle);
+                }
+            }
+            delay(10);
+        }
+
+        unsigned long totalPressTime = millis() - pressStart;
+
+        if (totalPressTime >= 7000) {
+            // === TIER 3: FULL FACTORY RESET (Held >= 7 seconds) ===
+            Serial.println("\n[Button] LONG PRESS (>=7s) -> EXECUTING FULL FACTORY RESET!");
+            // 1. Isolate relay immediately
+            digitalWrite(RELAY_PIN, LOW);
+            relayActive = false;
+
+            // 2. Visual feedback: 5 rapid confirmation strobe pulses
+            for (int i = 0; i < 5; i++) {
+                writeStatusLed(true);
+                delay(80);
+                writeStatusLed(false);
+                delay(80);
+            }
+
+            // 3. Clear all NVS preferences (Wi-Fi, User ID, Tank Config)
+            prefs.begin("smartpump", false);
+            prefs.clear();
+            prefs.end();
+
+            Serial.println("[Button] NVS cleared. Restarting ESP32 into factory state...\n");
+            delay(200);
+            ESP.restart();
+        } else if (totalPressTime >= 3000) {
+            // === TIER 2: BLE PROVISIONING MODE (Held 3 to 7 seconds) ===
+            Serial.println("\n[Button] MEDIUM PRESS (3-7s) -> Launching Bluetooth Provisioning Mode!");
+            startBleProvisioning();
+        } else if (totalPressTime >= 80) {
+            // === TIER 1: INBUILT HARDWARE RESET / REBOOT (Short press < 3 seconds) ===
+            Serial.println("\n[Button] SHORT PRESS (<3s) -> INBUILT HARDWARE RESET / CONTROLLER REBOOT!");
+            // 1. Isolate relay
+            digitalWrite(RELAY_PIN, LOW);
+            relayActive = false;
+
+            // 2. LED feedback: Double blink before restarting
+            writeStatusLed(false);
+            delay(100);
+            writeStatusLed(true);
+            delay(150);
+            writeStatusLed(false);
+            delay(100);
+
+            Serial.println("[Button] Rebooting controller (ESP.restart)...");
+            ESP.restart();
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     delay(200);
@@ -512,6 +628,7 @@ void setup() {
     writeStatusLed(false);
 
     pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(EXTERNAL_RESET_PIN, INPUT_PULLUP);
 
     // CRITICAL: Initialize WiFi Station mode first so ESP-NOW and BLE radio operate cleanly
     WiFi.mode(WIFI_STA);
@@ -561,18 +678,8 @@ void setup() {
 }
 
 void loop() {
-    // Check if BOOT button is held for 3 seconds to trigger BLE Pairing Mode
-    if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-        unsigned long pressStart = millis();
-        while (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-            delay(50);
-            if (millis() - pressStart >= 3000) {
-                Serial.println("[Hardware] BOOT button held for 3s -> Forcing BLE Provisioning Mode!");
-                startBleProvisioning();
-                break;
-            }
-        }
-    }
+    // Check hardware reset buttons (Inbuilt BOOT GPIO 0 and External GPIO 4)
+    checkHardwareResetButton();
 
     // Check if Wi-Fi connection has resolved
     if (isWifiConnecting) {
