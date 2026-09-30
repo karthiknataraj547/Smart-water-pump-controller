@@ -18,6 +18,7 @@
  * 6. Relay Contactor Pin Driver (GPIO 26) with LOCAL EMERGENCY STOP HARDWARE LATCH
  */
 
+#include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <esp_now.h>

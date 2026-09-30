@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    - "-xc++"
+    - "-std=c++17"
+    - "-DARDUINO=10819"
+    - "-DESP32"
+Diagnostics:
+  Suppress:
+    - "drv_unknown_argument"
+    - "drv_unsupported_opt"
