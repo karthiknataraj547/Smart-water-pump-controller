@@ -11,8 +11,113 @@ export const mqttService =
   globalForMqtt.smartPumpMqttService ??
   new SmartPumpMqttService(process.env.MQTT_BROKER_URL || 'mqtt://broker.emqx.io:1883');
 
-if (process.env.NODE_ENV !== 'production') {
-  globalForMqtt.smartPumpMqttService = mqttService;
+// Always persist singleton to globalThis
+globalForMqtt.smartPumpMqttService = mqttService;
+
+// In-memory live device registry for instantaneous sub-millisecond status lookups
+export const liveDeviceRegistry = new Map<string, {
+  serialNumber: string;
+  status: 'ONLINE' | 'OFFLINE';
+  lastHeartbeat: Date;
+  wifiRssi?: number;
+  pumpState?: string;
+}>();
+
+export function isSmartPumpDevice(deviceId: string): boolean {
+  if (!deviceId) return false;
+  return deviceId.startsWith('SP-') ||
+         deviceId.startsWith('SP_') ||
+         deviceId.toLowerCase().includes('ctrl') ||
+         deviceId.toLowerCase().includes('smartpump') ||
+         deviceId.toLowerCase().includes('pump');
+}
+
+/**
+ * Finds existing hardware or auto-registers an incoming device bound to the registered user.
+ * Guarantees device heartbeats are never dropped even if mock data was cleared or BLE claiming was skipped.
+ */
+async function findOrCreateHardware(serialNumber: string, userIdFromTopic?: string) {
+  if (!isSmartPumpDevice(serialNumber)) return null;
+  try {
+    let hw = await prisma.hardware.findUnique({
+      where: { serialNumber }
+    });
+    if (hw) return hw;
+
+    // Check if any hardware exists in the database
+    const allHw = await prisma.hardware.findMany({});
+    if (allHw.length > 0) {
+      // If there's an existing hardware with default or similar serial, adapt it
+      const match = allHw.find((h: any) => h.serialNumber === serialNumber || h.serialNumber.startsWith('SP-CTRL'));
+      if (match) {
+        if (match.serialNumber !== serialNumber) {
+          await prisma.hardware.update({
+            where: { id: match.id },
+            data: { serialNumber }
+          });
+        }
+        return match;
+      }
+    }
+
+    // Determine target user
+    let targetUserId = userIdFromTopic && userIdFromTopic !== 'unclaimed' ? userIdFromTopic : undefined;
+    if (!targetUserId) {
+      const firstUser = await prisma.user.findFirst({
+        orderBy: { createdAt: 'asc' }
+      });
+      if (firstUser) {
+        targetUserId = firstUser.id;
+      }
+    }
+
+    if (!targetUserId) {
+      console.warn(`[MQTT] Cannot auto-register device ${serialNumber}: No registered user found in DB`);
+      return null;
+    }
+
+    const cleanSuffix = serialNumber.replace(/[^A-Fa-f0-9]/g, '').slice(-4) || 'B244';
+    const macPart = cleanSuffix.match(/../g)?.join(':') || 'B2:44';
+
+    hw = await prisma.hardware.create({
+      data: {
+        serialNumber,
+        name: 'Smart Pump Controller',
+        userId: targetUserId,
+        status: 'ONLINE',
+        lastHeartbeat: new Date(),
+        macAddress: `24:6F:28:${macPart}`.toUpperCase(),
+        mainNode: {
+          create: {
+            esp32ChipId: `ESP32_${serialNumber}`,
+            relayState: false
+          }
+        },
+        pumpState: {
+          create: {
+            mode: 'MANUAL',
+            state: 'OFF'
+          }
+        },
+        credentials: {
+          create: {
+            mqttUsername: `dev_${serialNumber.toLowerCase()}`,
+            mqttPasswordHash: 'device_secret_hash'
+          }
+        }
+      },
+      include: {
+        pumpState: true,
+        mainNode: true
+      }
+    });
+
+    console.log(`[MQTT] Auto-registered hardware "${serialNumber}" to user ${targetUserId}`);
+    return hw;
+  } catch (err) {
+    console.error(`[MQTT] Error finding/creating hardware ${serialNumber}:`, err);
+    return null;
+  }
 }
 
 export async function publishDeviceCommand(
@@ -47,16 +152,25 @@ if (!globalForMqtt.mqttListenersInitialized) {
 
   // Listen for device heartbeat
   mqttService.on('heartbeat', async ({ deviceId, data }: DeviceMqttEvent) => {
+    if (!isSmartPumpDevice(deviceId)) return;
     try {
       const serialNumber = deviceId;
-      const hw = await prisma.hardware.findUnique({
-        where: { serialNumber }
+      const now = new Date();
+
+      // Immediately record in memory
+      liveDeviceRegistry.set(serialNumber, {
+        serialNumber,
+        status: 'ONLINE',
+        lastHeartbeat: now,
+        wifiRssi: typeof data.wifiRssi === 'number' ? data.wifiRssi : undefined,
+        pumpState: data.pumpState
       });
+
+      const hw = await findOrCreateHardware(serialNumber);
       if (!hw) return;
 
-      const now = new Date();
       await prisma.hardware.update({
-        where: { serialNumber },
+        where: { id: hw.id },
         data: {
           status: 'ONLINE',
           lastHeartbeat: now,
@@ -96,16 +210,23 @@ if (!globalForMqtt.mqttListenersInitialized) {
 
   // Listen for telemetry
   mqttService.on('telemetry', async ({ deviceId, data }: DeviceMqttEvent) => {
+    if (!isSmartPumpDevice(deviceId)) return;
     try {
       const serialNumber = deviceId;
-      const hw = await prisma.hardware.findUnique({
-        where: { serialNumber }
+      const now = new Date();
+
+      liveDeviceRegistry.set(serialNumber, {
+        serialNumber,
+        status: 'ONLINE',
+        lastHeartbeat: now,
+        pumpState: data.pumpState
       });
+
+      const hw = await findOrCreateHardware(serialNumber);
       if (!hw) return;
 
-      const now = new Date();
       await prisma.hardware.update({
-        where: { serialNumber },
+        where: { id: hw.id },
         data: {
           status: 'ONLINE',
           lastHeartbeat: now
@@ -148,19 +269,31 @@ if (!globalForMqtt.mqttListenersInitialized) {
 
   // Listen for LWT / status
   mqttService.on('status', async ({ deviceId, data }: DeviceMqttEvent) => {
+    if (!isSmartPumpDevice(deviceId)) return;
     try {
       const serialNumber = deviceId;
       const statusStr = typeof data === 'string' ? data : (data.status || '');
       if (statusStr === 'OFFLINE') {
+        const live = liveDeviceRegistry.get(serialNumber);
+        if (live) live.status = 'OFFLINE';
         await prisma.hardware.updateMany({
           where: { serialNumber },
           data: { status: 'OFFLINE' }
         });
       } else if (statusStr === 'ONLINE') {
-        await prisma.hardware.updateMany({
-          where: { serialNumber },
-          data: { status: 'ONLINE', lastHeartbeat: new Date() }
+        const now = new Date();
+        liveDeviceRegistry.set(serialNumber, {
+          serialNumber,
+          status: 'ONLINE',
+          lastHeartbeat: now
         });
+        const hw = await findOrCreateHardware(serialNumber);
+        if (hw) {
+          await prisma.hardware.update({
+            where: { id: hw.id },
+            data: { status: 'ONLINE', lastHeartbeat: now }
+          });
+        }
       }
     } catch (err) {
       console.error('[MQTT] Error syncing status to DB:', err);

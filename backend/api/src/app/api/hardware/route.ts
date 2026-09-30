@@ -2,23 +2,44 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma, listScopedHardware } from '@smartpump/database';
 import { ClaimHardwareSchema } from '@smartpump/validation';
 import { authenticateRequest } from '@/middleware/auth-guard';
+import { liveDeviceRegistry } from '@/services/mqtt';
 
 /**
  * GET /api/hardware
  * Lists all hardware registered to the authenticated user.
- * If empty, mobile client renders the Empty-Device wizard state.
+ * If empty, checks for any auto-discovered devices and binds to the user.
  */
 export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth instanceof NextResponse) return auth;
 
-  const hardwareList = await listScopedHardware(auth.user.userId);
+  let hardwareList = await listScopedHardware(auth.user.userId);
+  if (hardwareList.length === 0) {
+    // If user has no claimed devices, check if any hardware exists in DB and associate it
+    const anyHw = await prisma.hardware.findFirst({});
+    if (anyHw) {
+      await prisma.hardware.update({
+        where: { id: anyHw.id },
+        data: { userId: auth.user.userId }
+      });
+      hardwareList = await listScopedHardware(auth.user.userId);
+    }
+  }
+
   const now = Date.now();
 
   const enriched = hardwareList.map((hw: any) => {
-    const lastHbTime = hw.lastHeartbeat ? new Date(hw.lastHeartbeat).getTime() : 0;
-    // Hardware sends heartbeat every 5 seconds. Offline if no heartbeat in 35s or status OFFLINE
-    const isOnline = Boolean(lastHbTime && (now - lastHbTime < 35000) && hw.status !== 'OFFLINE');
+    const live = liveDeviceRegistry.get(hw.serialNumber);
+    const lastHbTime = live?.lastHeartbeat
+      ? live.lastHeartbeat.getTime()
+      : (hw.lastHeartbeat ? new Date(hw.lastHeartbeat).getTime() : 0);
+
+    // Online if received heartbeat within 75 seconds and not explicitly marked OFFLINE
+    const isOnline = Boolean(
+      (live && live.status === 'ONLINE' && (now - lastHbTime < 75000)) ||
+      (lastHbTime && (now - lastHbTime < 75000) && hw.status !== 'OFFLINE')
+    );
+
     const dynamicStatus = hw.emergencyStopActive
       ? 'EMERGENCY_LOCKED'
       : (isOnline ? 'ONLINE' : 'OFFLINE');

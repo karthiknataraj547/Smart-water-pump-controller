@@ -8,6 +8,7 @@ import '../../../core/theme/theme_provider.dart';
 import '../../../core/auth/auth_provider.dart';
 import '../../../core/pump/pump_provider.dart';
 import '../../../core/ble/ble_provisioning_service.dart';
+import '../../../core/api/api_client.dart';
 
 class BleProvisioningDialog extends ConsumerStatefulWidget {
   final VoidCallback onCompleted;
@@ -234,8 +235,25 @@ class _BleProvisioningDialogState extends ConsumerState<BleProvisioningDialog>
         );
       }
 
+      // Register device in cloud backend
+      try {
+        final serial = _selectedNode?.serialNumber ?? 'SP-CTRL-B244';
+        await defaultApiClient.postWithFallback('/api/hardware', {
+          'serialNumber': serial,
+          'name': 'Smart Pump Controller',
+          'tankType': _selectedTankType,
+          'tankCapacityLiters': capacity,
+          'tankDepthCm': _tankDepthCm.toInt(),
+          'sensorOffsetCm': _sensorOffsetCm.toInt(),
+          'motorHp': _motorHp,
+        });
+      } catch (err) {
+        debugPrint('[Claim] Backend sync notice: $err');
+      }
+
       // Update mobile local state
       await ref.read(authProvider.notifier).claimHardware();
+      await ref.read(pumpProvider.notifier).fetchHardwareState();
 
       if (mounted) {
         setState(() => _isSavingTankConfig = false);

@@ -154,8 +154,9 @@ export class PersistentDataStore {
       return result;
     },
 
-    findFirst: async (args: { where: any }) => {
+    findFirst: async (args?: { where?: any; orderBy?: any }) => {
       const users = Object.values(this.data.users);
+      if (!args?.where) return users[0] ?? null;
       return users.find((u: any) => {
         for (const [k, v] of Object.entries(args.where)) {
           if (u[k] !== v) return false;
@@ -287,12 +288,12 @@ export class PersistentDataStore {
       return this.populateHardware(match, args.include);
     },
 
-    findMany: async (args: { where?: { userId?: string }; include?: any; orderBy?: any }) => {
+    findMany: async (args: { where?: { userId?: string }; include?: any; orderBy?: any } = {}) => {
       let list = Object.values(this.data.hardware);
-      if (args.where?.userId) {
+      if (args?.where?.userId) {
         list = list.filter((h: any) => h.userId === args.where?.userId);
       }
-      return list.map((h: any) => this.populateHardware(h, args.include));
+      return list.map((h: any) => this.populateHardware(h, args?.include));
     },
 
     create: async (args: { data: any; include?: any }) => {
@@ -369,6 +370,21 @@ export class PersistentDataStore {
       return this.populateHardware(this.data.hardware[id], args.include);
     },
 
+    updateMany: async (args: { where?: { serialNumber?: string; id?: string }; data: any }) => {
+      let count = 0;
+      for (const h of Object.values(this.data.hardware) as any[]) {
+        let match = true;
+        if (args.where?.serialNumber && h.serialNumber !== args.where.serialNumber) match = false;
+        if (args.where?.id && h.id !== args.where.id) match = false;
+        if (match) {
+          this.data.hardware[h.id] = { ...h, ...args.data, updatedAt: new Date() };
+          count++;
+        }
+      }
+      if (count > 0) this.save();
+      return { count };
+    },
+
     upsert: async (args: { where: { serialNumber?: string; id?: string }; create: any; update: any; include?: any }) => {
       const existing = await this.hardware.findUnique({ where: args.where });
       if (existing) {
@@ -418,6 +434,71 @@ export class PersistentDataStore {
       if (args.where.hardwareId && this.data.pumpStates[args.where.hardwareId]) {
         this.data.pumpStates[args.where.hardwareId] = {
           ...this.data.pumpStates[args.where.hardwareId],
+          ...args.data,
+          updatedAt: new Date(),
+        };
+        this.save();
+        return { count: 1 };
+      }
+      return { count: 0 };
+    },
+
+    upsert: async (args: { where: { hardwareId?: string; id?: string }; create: any; update: any }) => {
+      const p = await this.pumpState.findUnique({ where: args.where });
+      if (p) {
+        return this.pumpState.update({ where: args.where, data: args.update });
+      }
+      const hwId = args.create.hardwareId;
+      const id = args.create.id || crypto.randomUUID();
+      const newP = { id, ...args.create, updatedAt: new Date() };
+      this.data.pumpStates[hwId] = newP;
+      this.save();
+      return newP;
+    }
+  };
+
+  // --- MAIN NODE ---
+  readonly mainNode = {
+    findUnique: async (args: { where: { hardwareId?: string; id?: string } }) => {
+      if (args.where.hardwareId) return this.data.mainNodes[args.where.hardwareId] ?? null;
+      if (args.where.id) {
+        return Object.values(this.data.mainNodes).find((m: any) => m.id === args.where.id) ?? null;
+      }
+      return null;
+    },
+
+    update: async (args: { where: { hardwareId?: string }; data: any }) => {
+      const hwId = args.where.hardwareId;
+      if (hwId && this.data.mainNodes[hwId]) {
+        this.data.mainNodes[hwId] = {
+          ...this.data.mainNodes[hwId],
+          ...args.data,
+          updatedAt: new Date(),
+        };
+        this.save();
+        return this.data.mainNodes[hwId];
+      }
+      throw new Error('MainNode not found');
+    },
+
+    updateMany: async (args: { where: { hardwareId?: string }; data: any }) => {
+      const hwId = args.where?.hardwareId;
+      if (hwId) {
+        if (!this.data.mainNodes[hwId]) {
+          this.data.mainNodes[hwId] = {
+            id: crypto.randomUUID(),
+            hardwareId: hwId,
+            esp32ChipId: `ESP32-${hwId}`,
+            bootCount: 1,
+            freeHeap: 245000,
+            relayState: false,
+            uptimeSeconds: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        }
+        this.data.mainNodes[hwId] = {
+          ...this.data.mainNodes[hwId],
           ...args.data,
           updatedAt: new Date(),
         };

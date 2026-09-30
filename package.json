@@ -36,6 +36,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@babel/runtime": "^8.0.5",
     "effect": "^3.22.2",
     "next": "^15.5.26"
   },

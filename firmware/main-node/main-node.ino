@@ -601,6 +601,13 @@ void setup() {
     // CRITICAL: Initialize WiFi Station mode first so ESP-NOW and BLE radio operate cleanly
     WiFi.mode(WIFI_STA);
 
+    // Derive serial number from MAC address at boot (consistent across all boot paths)
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    snprintf(serialNumber, sizeof(serialNumber), "SP-CTRL-%02X%02X", mac[4], mac[5]);
+    Serial.printf("[Boot] Hardware Serial: %s (MAC: %02X:%02X:%02X:%02X:%02X:%02X)\n",
+        serialNumber, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
     // Load stored Wi-Fi, user ID, and Tank parameters from NVS
     prefs.begin("smartpump", true);
     String savedSsid = prefs.getString("wifi_ssid", "");
