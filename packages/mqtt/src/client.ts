@@ -18,11 +18,21 @@ export class SmartPumpMqttService extends EventEmitter {
 
   constructor(brokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://broker.emqx.io:1883', options?: IClientOptions) {
     super();
+
+    // Build auth options from environment (support secured brokers)
+    const authOptions: IClientOptions = {};
+    if (process.env.MQTT_USERNAME) authOptions.username = process.env.MQTT_USERNAME;
+    if (process.env.MQTT_PASSWORD) authOptions.password = process.env.MQTT_PASSWORD;
+
+    console.log(`[MQTT] Connecting to broker: ${brokerUrl}`);
+
     this.client = mqtt.connect(brokerUrl, {
-      clientId: `backend_service_${Math.random().toString(16).slice(2, 8)}`,
+      clientId: `smartpump_backend_${Math.random().toString(16).slice(2, 10)}`,
       clean: true,
-      connectTimeout: 8000,
-      reconnectPeriod: 3000,
+      connectTimeout: 10000,
+      reconnectPeriod: 5000,
+      keepalive: 30,
+      ...authOptions,
       ...options
     });
 
