@@ -15,13 +15,37 @@ class MqttRealtimeClient {
   MqttServerClient? _client;
   bool _isConnected = false;
   Timer? _reconnectTimer;
+  Timer? _watchdogTimer;
   bool _isConnecting = false;
+
+  final Map<String, bool> _deviceStatus = {};
+  final Map<String, DateTime> _lastSeen = {};
 
   DeviceStatusCallback? onStatusUpdate;
   DeviceHeartbeatCallback? onHeartbeatUpdate;
   DeviceTelemetryCallback? onTelemetryUpdate;
 
   bool get isConnected => _isConnected;
+
+  bool hasReceivedStatusFor(String serialNumber) {
+    if (_deviceStatus.containsKey(serialNumber)) return true;
+    for (final k in _deviceStatus.keys) {
+      if (k.contains(serialNumber) || serialNumber.contains(k)) return true;
+    }
+    return false;
+  }
+
+  bool isDeviceOnline(String serialNumber) {
+    if (_deviceStatus.containsKey(serialNumber)) {
+      return _deviceStatus[serialNumber] ?? false;
+    }
+    for (final entry in _deviceStatus.entries) {
+      if (entry.key.contains(serialNumber) || serialNumber.contains(entry.key)) {
+        return entry.value;
+      }
+    }
+    return false;
+  }
 
   Future<void> initialize({
     String broker = 'broker.emqx.io',
@@ -31,18 +55,18 @@ class MqttRealtimeClient {
     _isConnecting = true;
 
     try {
-      final clientId = 'sp_app_${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}';
+      final clientId = 'sp_app_${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond % 1000}';
       final client = MqttServerClient(broker, clientId);
       client.port = port;
       client.logging(on: false);
-      client.keepAlivePeriod = 30;
+      client.setProtocolV311();
+      client.keepAlivePeriod = 20;
       client.autoReconnect = true;
       client.resubscribeOnAutoReconnect = true;
 
       final connMessage = MqttConnectMessage()
           .withClientIdentifier(clientId)
-          .startClean()
-          .withWillQos(MqttQos.atLeastOnce);
+          .startClean();
       client.connectionMessage = connMessage;
 
       client.onConnected = _onConnected;
@@ -61,8 +85,10 @@ class MqttRealtimeClient {
         _client = client;
         _isConnected = true;
         _isConnecting = false;
+        _startWatchdog();
         _subscribeToDeviceTopics();
         _listenToIncomingMessages();
+        debugPrint('[MQTT] Real-time MQTT connected successfully to $broker:$port');
       } else {
         _isConnecting = false;
         _scheduleReconnect();
@@ -78,6 +104,7 @@ class MqttRealtimeClient {
     debugPrint('[MQTT] Connected to EMQX broker successfully.');
     _isConnected = true;
     _isConnecting = false;
+    _startWatchdog();
     _subscribeToDeviceTopics();
   }
 
@@ -96,9 +123,26 @@ class MqttRealtimeClient {
 
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 8), () {
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
       if (!_isConnected && !_isConnecting) {
         initialize();
+      }
+    });
+  }
+
+  void _startWatchdog() {
+    _watchdogTimer?.cancel();
+    // Heartbeat timeout watchdog: if a device marked online doesn't ping for > 15s, mark offline
+    _watchdogTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      final now = DateTime.now();
+      for (final entry in _lastSeen.entries) {
+        final serial = entry.key;
+        final last = entry.value;
+        if (_deviceStatus[serial] == true && now.difference(last).inSeconds > 15) {
+          debugPrint('[MQTT-Watchdog] Device $serial heartbeat timeout (>15s). Marking OFFLINE.');
+          _deviceStatus[serial] = false;
+          onStatusUpdate?.call(serial, false);
+        }
       }
     });
   }
@@ -106,7 +150,6 @@ class MqttRealtimeClient {
   void _subscribeToDeviceTopics() {
     if (_client == null || !_isConnected) return;
     try {
-      // Subscribe to user-scoped and device-scoped status, heartbeat and telemetry
       _client!.subscribe('users/+/devices/+/status', MqttQos.atLeastOnce);
       _client!.subscribe('users/+/devices/+/heartbeat', MqttQos.atLeastOnce);
       _client!.subscribe('users/+/devices/+/telemetry', MqttQos.atLeastOnce);
@@ -139,7 +182,7 @@ class MqttRealtimeClient {
     final parts = topic.split('/');
     String? serialNumber;
 
-    // e.g. users/{userId}/devices/{serialNumber}/status
+    // users/{userId}/devices/{serialNumber}/status
     if (parts.length >= 5 && parts[0] == 'users' && parts[2] == 'devices') {
       serialNumber = parts[3];
     } else if (parts.length >= 3 && parts[0] == 'devices') {
@@ -150,15 +193,26 @@ class MqttRealtimeClient {
 
     if (topic.endsWith('/status')) {
       final isOnline = payload.trim().toUpperCase() == 'ONLINE';
+      _deviceStatus[serialNumber] = isOnline;
+      if (isOnline) {
+        _lastSeen[serialNumber] = DateTime.now();
+      }
+      debugPrint('[MQTT] Live status update: $serialNumber -> ${isOnline ? "ONLINE" : "OFFLINE"}');
       onStatusUpdate?.call(serialNumber, isOnline);
     } else if (topic.endsWith('/heartbeat')) {
       try {
         final data = jsonDecode(payload) as Map<String, dynamic>;
+        _deviceStatus[serialNumber] = true;
+        _lastSeen[serialNumber] = DateTime.now();
+        onStatusUpdate?.call(serialNumber, true);
         onHeartbeatUpdate?.call(serialNumber, data);
       } catch (_) {}
     } else if (topic.endsWith('/telemetry')) {
       try {
         final data = jsonDecode(payload) as Map<String, dynamic>;
+        _deviceStatus[serialNumber] = true;
+        _lastSeen[serialNumber] = DateTime.now();
+        onStatusUpdate?.call(serialNumber, true);
         onTelemetryUpdate?.call(serialNumber, data);
       } catch (_) {}
     }
@@ -172,7 +226,6 @@ class MqttRealtimeClient {
     Map<String, dynamic>? extraArgs,
   }) async {
     if (_client == null || !_isConnected) {
-      // Try to connect once if not connected
       await initialize();
       if (!_isConnected) return false;
     }
@@ -235,6 +288,7 @@ class MqttRealtimeClient {
 
   void dispose() {
     _reconnectTimer?.cancel();
+    _watchdogTimer?.cancel();
     _client?.disconnect();
     _isConnected = false;
   }

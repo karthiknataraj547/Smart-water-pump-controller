@@ -365,8 +365,17 @@ class PumpNotifier extends StateNotifier<PumpState> {
         final hwId = hw['id'] as String?;
         final sNum = hw['serialNumber'] as String?;
         final hwName = hw['name'] as String?;
-        // Device is online if flagged as online, status is ONLINE, or MQTT client is receiving live messages
-        final isOnline = hw['isOnline'] == true || hw['status'] == 'ONLINE' || state.isOnline;
+        final effectiveSerial = sNum ?? state.serialNumber ?? 'SP-CTRL-69E0';
+        final hasMqttStatus = MqttRealtimeClient.instance.hasReceivedStatusFor(effectiveSerial);
+        final isMqttOnline = MqttRealtimeClient.instance.isDeviceOnline(effectiveSerial);
+
+        // Real-time MQTT has ground truth directly from physical hardware on broker.emqx.io
+        final bool isOnline;
+        if (hasMqttStatus) {
+          isOnline = isMqttOnline;
+        } else {
+          isOnline = hw['isOnline'] == true && hw['status'] == 'ONLINE';
+        }
         final isEmergency = hw['emergencyStopActive'] == true || hw['status'] == 'EMERGENCY_LOCKED';
         final pState = hw['pumpState'] as Map<String, dynamic>?;
         final pModeStr = (pState?['mode'] as String?)?.toLowerCase();

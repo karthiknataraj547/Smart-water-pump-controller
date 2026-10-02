@@ -58,12 +58,18 @@ export async function GET(req: NextRequest) {
     } catch (_) {}
   }
 
-  // Ensure isOnline is strictly boolean for Flutter mobile client
-  const formatted = (hardwareList || []).map((hw: any) => ({
-    ...hw,
-    isOnline: hw.status === 'ONLINE' || hw.isOnline === true,
-    status: hw.status || 'ONLINE'
-  }));
+  // Return ground-truth online status: only online if actively seen in the last 20 seconds
+  const now = Date.now();
+  const formatted = (hardwareList || []).map((hw: any) => {
+    const lastHb = hw.lastHeartbeat ? new Date(hw.lastHeartbeat).getTime() : 0;
+    const isRecentlyActive = (now - lastHb) < 20000;
+    const isOnline = isRecentlyActive && hw.status !== 'OFFLINE';
+    return {
+      ...hw,
+      isOnline,
+      status: isOnline ? 'ONLINE' : 'OFFLINE',
+    };
+  });
 
   return NextResponse.json(formatted);
 }
