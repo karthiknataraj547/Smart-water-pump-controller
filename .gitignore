@@ -68,3 +68,6 @@ infrastructure/mosquitto/log/
 .data/
 *.png
 
+# Playwright
+playwright-report/
+test-results/

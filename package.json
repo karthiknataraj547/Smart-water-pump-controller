@@ -21,9 +21,13 @@
     "docker:up": "docker compose -f infrastructure/docker-compose.yml up -d",
     "docker:down": "docker compose -f infrastructure/docker-compose.yml down",
     "update:web-apk": "node scripts/sync-apk-to-web.js",
-    "build:apk": "cd apps/mobile && flutter build apk --release --split-per-abi && node ../../scripts/sync-apk-to-web.js"
+    "build:apk": "cd apps/mobile && flutter build apk --release && node ../../scripts/sync-apk-to-web.js",
+    "watch:apk": "node scripts/sync-apk-to-web.js --watch",
+    "test:e2e": "playwright test",
+    "test:ponytail": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.2",
     "eslint": "^9.16.0",
