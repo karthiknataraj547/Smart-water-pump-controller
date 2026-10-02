@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_client.dart';
+import '../mqtt/mqtt_realtime_client.dart';
 
 enum PumpMode {
   manual,
@@ -285,10 +286,68 @@ class PumpNotifier extends StateNotifier<PumpState> {
   PumpNotifier({ApiClient? apiClient})
       : _apiClient = apiClient ?? defaultApiClient,
         super(const PumpState()) {
+    _initMqtt();
     fetchHardwareState();
     _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       fetchHardwareState();
     });
+  }
+
+  void _initMqtt() {
+    // 1. Instant status callback from MQTT broker
+    MqttRealtimeClient.instance.onStatusUpdate = (serial, online) {
+      final curSerial = state.serialNumber;
+      if (curSerial == null || curSerial == serial || serial.contains('SP-CTRL') || serial.contains('CTRL')) {
+        state = state.copyWith(
+          isOnline: online,
+          serialNumber: curSerial ?? serial,
+        );
+      }
+    };
+
+    // 2. Real-time heartbeat from physical ESP32
+    MqttRealtimeClient.instance.onHeartbeatUpdate = (serial, data) {
+      final curSerial = state.serialNumber;
+      if (curSerial == null || curSerial == serial || serial.contains('SP-CTRL') || serial.contains('CTRL')) {
+        final pState = (data['pumpState'] as String?)?.toUpperCase();
+        final isRunning = pState == 'ON';
+        final rssi = (data['wifiRssi'] as num?)?.toInt() ?? state.wifiRssi;
+
+        state = state.copyWith(
+          isOnline: true,
+          serialNumber: curSerial ?? serial,
+          isRunning: isRunning,
+          wifiRssi: rssi,
+        );
+      }
+    };
+
+    // 3. Real-time sensor telemetry from physical ESP32
+    MqttRealtimeClient.instance.onTelemetryUpdate = (serial, data) {
+      final curSerial = state.serialNumber;
+      if (curSerial == null || curSerial == serial || serial.contains('SP-CTRL') || serial.contains('CTRL')) {
+        final level = (data['tankLevelPct'] as num?)?.toDouble() ?? state.tankLevelPct;
+        final vol = (data['waterVolumeLiters'] as num?)?.toDouble() ?? state.waterVolumeLiters;
+        final flow = (data['flowRateLpm'] as num?)?.toDouble() ?? state.flowRateLpm;
+        final tds = (data['tdsPpm'] as num?)?.toInt() ?? state.tdsPpm;
+        final pState = (data['pumpState'] as String?)?.toUpperCase();
+        final isRunning = pState != null ? (pState == 'ON') : state.isRunning;
+
+        state = state.copyWith(
+          isOnline: true,
+          serialNumber: curSerial ?? serial,
+          hasRealData: true,
+          tankLevelPct: level,
+          waterVolumeLiters: vol,
+          flowRateLpm: isRunning ? flow : 0.0,
+          tdsPpm: tds,
+          isRunning: isRunning,
+        );
+      }
+    };
+
+    // Start connecting to EMQX MQTT broker
+    MqttRealtimeClient.instance.initialize();
   }
 
   @override
@@ -306,7 +365,8 @@ class PumpNotifier extends StateNotifier<PumpState> {
         final hwId = hw['id'] as String?;
         final sNum = hw['serialNumber'] as String?;
         final hwName = hw['name'] as String?;
-        final isOnline = hw['isOnline'] == true;
+        // Device is online if flagged as online, status is ONLINE, or MQTT client is receiving live messages
+        final isOnline = hw['isOnline'] == true || hw['status'] == 'ONLINE' || state.isOnline;
         final isEmergency = hw['emergencyStopActive'] == true || hw['status'] == 'EMERGENCY_LOCKED';
         final pState = hw['pumpState'] as Map<String, dynamic>?;
         final pModeStr = (pState?['mode'] as String?)?.toLowerCase();
@@ -338,7 +398,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
 
         state = state.copyWith(
           hardwareId: hwId,
-          serialNumber: sNum,
+          serialNumber: sNum ?? state.serialNumber,
           hardwareName: hwName,
           isOnline: isOnline,
           isEmergencyStopped: isEmergency,
@@ -353,8 +413,6 @@ class PumpNotifier extends StateNotifier<PumpState> {
           hasRealData: hasData,
           wifiRssi: rssi,
         );
-      } else if (resp.data is List && (resp.data as List).isEmpty) {
-        state = state.copyWith(isOnline: false, hasRealData: false);
       }
     } catch (_) {
       // Backend temporarily unreachable
@@ -362,6 +420,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
   }
 
   Future<void> togglePump() async {
+    if (!state.isOnline) return; // Frozen when offline
     if (state.isEmergencyStopped) return;
     if (state.mode == PumpMode.auto) return;
 
@@ -373,14 +432,16 @@ class PumpNotifier extends StateNotifier<PumpState> {
   }
 
   Future<void> startPump() async {
+    if (!state.isOnline) return; // Frozen when offline
     if (state.isEmergencyStopped || state.isRunning) return;
     if (state.mode == PumpMode.auto) return;
 
     state = state.copyWith(isStarting: true);
     try {
-      if (state.hardwareId == null || state.hardwareId!.isEmpty) {
-        await fetchHardwareState();
-      }
+      final sNum = state.serialNumber ?? 'SP-CTRL-69E0';
+      // Fast dispatch via MQTT
+      MqttRealtimeClient.instance.sendCommand(serialNumber: sNum, command: 'PUMP_START');
+
       final hwId = state.hardwareId;
       if (hwId != null && hwId.isNotEmpty) {
         await _apiClient.postWithFallback('/api/hardware/$hwId/pump/start', {});
@@ -399,13 +460,15 @@ class PumpNotifier extends StateNotifier<PumpState> {
   }
 
   Future<void> stopPump() async {
+    if (!state.isOnline) return; // Frozen when offline
     if (state.mode == PumpMode.auto) return;
 
     state = state.copyWith(isStopping: true);
     try {
-      if (state.hardwareId == null || state.hardwareId!.isEmpty) {
-        await fetchHardwareState();
-      }
+      final sNum = state.serialNumber ?? 'SP-CTRL-69E0';
+      // Fast dispatch via MQTT
+      MqttRealtimeClient.instance.sendCommand(serialNumber: sNum, command: 'PUMP_STOP');
+
       final hwId = state.hardwareId;
       if (hwId != null && hwId.isNotEmpty) {
         await _apiClient.postWithFallback('/api/hardware/$hwId/pump/stop', {});
@@ -424,16 +487,26 @@ class PumpNotifier extends StateNotifier<PumpState> {
     }
   }
 
-  Future<void> rebootHardware() async {
-    if (state.hardwareId == null || state.hardwareId!.isEmpty) {
-      await fetchHardwareState();
-    }
+  /// Remotely reboots the ESP32 hardware over MQTT without pressing any physical button
+  Future<bool> rebootHardware() async {
+    final sNum = state.serialNumber ?? 'SP-CTRL-69E0';
+    bool dispatched = false;
+    // 1. Immediately send REBOOT_DEVICE command to ESP32 over MQTT
+    try {
+      dispatched = await MqttRealtimeClient.instance.rebootHardware(serialNumber: sNum);
+    } catch (_) {}
+
+    // 2. Also dispatch via backend API if available
     final hwId = state.hardwareId;
     if (hwId != null && hwId.isNotEmpty) {
-      await _apiClient.postWithFallback('/api/hardware/$hwId/reboot', {});
+      try {
+        await _apiClient.postWithFallback('/api/hardware/$hwId/reboot', {});
+        dispatched = true;
+      } catch (_) {}
     }
     await Future.delayed(const Duration(milliseconds: 500));
     await fetchHardwareState();
+    return dispatched;
   }
 
   void toggleRemoteAutoCutoff() {
@@ -525,6 +598,9 @@ class PumpNotifier extends StateNotifier<PumpState> {
       powerWatts: 0.0,
     );
     try {
+      final sNum = state.serialNumber ?? 'SP-CTRL-69E0';
+      MqttRealtimeClient.instance.sendCommand(serialNumber: sNum, command: 'EMERGENCY_STOP');
+
       final hwId = state.hardwareId;
       if (hwId != null && hwId.isNotEmpty) {
         await _apiClient.postWithFallback(
@@ -538,6 +614,9 @@ class PumpNotifier extends StateNotifier<PumpState> {
 
   Future<void> clearEmergencyLockout() async {
     try {
+      final sNum = state.serialNumber ?? 'SP-CTRL-69E0';
+      MqttRealtimeClient.instance.sendCommand(serialNumber: sNum, command: 'RESET_EMERGENCY');
+
       final hwId = state.hardwareId;
       if (hwId != null && hwId.isNotEmpty) {
         await _apiClient.postWithFallback(

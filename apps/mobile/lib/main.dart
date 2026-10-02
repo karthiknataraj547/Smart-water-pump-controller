@@ -88,12 +88,36 @@ class MainNavigationShell extends ConsumerStatefulWidget {
 class _MainNavigationShellState extends ConsumerState<MainNavigationShell> {
   int _currentIndex = 0;
 
+  void _openSettings(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => SettingsScreen(
+          onNavigateTab: (idx) {
+            Navigator.pop(ctx);
+            if (idx >= 0 && idx < 4) {
+              setState(() => _currentIndex = idx);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   late final List<Widget> _screens = [
-    DashboardScreen(onNavigateTab: (idx) => setState(() => _currentIndex = idx)),
-    const HardwareScreen(),
-    const PumpControlScreen(),
-    const TelemetryScreen(),
-    SettingsScreen(onNavigateTab: (idx) => setState(() => _currentIndex = idx)),
+    DashboardScreen(
+      onNavigateTab: (idx) => setState(() => _currentIndex = idx),
+      onOpenSettings: () => _openSettings(context),
+    ),
+    HardwareScreen(
+      onOpenSettings: () => _openSettings(context),
+    ),
+    PumpControlScreen(
+      onOpenSettings: () => _openSettings(context),
+    ),
+    TelemetryScreen(
+      onOpenSettings: () => _openSettings(context),
+    ),
   ];
 
   @override
@@ -151,10 +175,6 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> {
             BottomNavigationBarItem(
               icon: Icon(Icons.insights_rounded),
               label: 'Telemetry',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.settings_rounded),
-              label: 'Settings',
             ),
           ],
         ),

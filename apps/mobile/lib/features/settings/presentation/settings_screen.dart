@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/auth/auth_provider.dart';
+import '../../../core/pump/pump_provider.dart';
 import '../../provisioning/presentation/ble_provisioning_dialog.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -139,6 +140,59 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  void _showRebootConfirmDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: Row(
+          children: [
+            const Icon(Icons.restart_alt_rounded, color: Color(0xFFF59E0B), size: 26),
+            const SizedBox(width: 10),
+            Text(
+              'Remote Hardware Reset',
+              style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 16),
+            ),
+          ],
+        ),
+        content: Text(
+          'This will send a remote REBOOT_DEVICE signal to the ESP32 controller over MQTT.\n\nThe microcontroller will safely de-energize the pump relay and restart automatically without touching any physical buttons.\n\nAre you sure you want to proceed?',
+          style: GoogleFonts.plusJakartaSans(fontSize: 12, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final success = await ref.read(pumpProvider.notifier).rebootHardware();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      success
+                          ? 'Remote reboot command dispatched to hardware!'
+                          : 'Failed to dispatch reboot command. Check connectivity.',
+                      style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+                    ),
+                    backgroundColor: success ? AppColors.emeraldSuccess : AppColors.crimsonError,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF59E0B),
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Reboot Hardware', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
@@ -153,6 +207,12 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: isDark ? AppColors.darkBg : AppColors.lightBg,
       appBar: AppBar(
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: () => Navigator.pop(context),
+              )
+            : null,
         title: Text(
           'Settings & System',
           style: GoogleFonts.plusJakartaSans(color: textPrim, fontWeight: FontWeight.w800, fontSize: 20),
@@ -414,6 +474,17 @@ class SettingsScreen extends ConsumerWidget {
                   textPrim: textPrim,
                   textSec: textSec,
                   onTap: () => _showAboutDialog(context, isDark),
+                ),
+                Divider(height: 1, color: borderCol),
+                _SettingsTile(
+                  icon: Icons.restart_alt_rounded,
+                  iconColor: const Color(0xFFF59E0B),
+                  title: 'Remote Hardware Reset',
+                  subtitle: 'Reboot ESP32 remotely over MQTT without pressing physical buttons',
+                  isDark: isDark,
+                  textPrim: textPrim,
+                  textSec: textSec,
+                  onTap: () => _showRebootConfirmDialog(context, ref),
                 ),
                 Divider(height: 1, color: borderCol),
                 if (authState.hasClaimedHardware) ...[

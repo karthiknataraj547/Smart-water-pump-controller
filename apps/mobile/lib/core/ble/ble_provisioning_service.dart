@@ -38,6 +38,16 @@ class BleDiscoveredNode {
     final clamped = rssi.clamp(-100, -40);
     return (clamped + 100) / 60.0;
   }
+
+  /// Derived device serial identifier
+  String get serialNumber {
+    if (name.startsWith('SP-CTRL')) return name;
+    final cleanMac = macAddress.replaceAll(':', '').toUpperCase();
+    if (cleanMac.length >= 4) {
+      return 'SP-CTRL-${cleanMac.substring(cleanMac.length - 4)}';
+    }
+    return 'SP-CTRL-69E0';
+  }
 }
 
 enum ConnectionStage {

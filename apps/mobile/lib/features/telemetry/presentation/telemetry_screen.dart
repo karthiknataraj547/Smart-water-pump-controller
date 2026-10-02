@@ -5,10 +5,12 @@ import 'package:fl_chart/fl_chart.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/pump/pump_provider.dart';
-import '../../../shared/dialogs/app_controls_sheet.dart';
+import '../../settings/presentation/settings_screen.dart';
 
 class TelemetryScreen extends ConsumerStatefulWidget {
-  const TelemetryScreen({super.key});
+  final VoidCallback? onOpenSettings;
+
+  const TelemetryScreen({super.key, this.onOpenSettings});
 
   @override
   ConsumerState<TelemetryScreen> createState() => _TelemetryScreenState();
@@ -83,46 +85,9 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
           ],
         ),
         actions: [
-          // Refresh Hardware State Button
-          Container(
-            margin: const EdgeInsets.only(right: 6),
-            decoration: BoxDecoration(
-              color: bgSurface,
-              shape: BoxShape.circle,
-              border: Border.all(color: borderCol),
-            ),
-            child: IconButton(
-              tooltip: 'Refresh Telemetry',
-              onPressed: () async {
-                await ref.read(pumpProvider.notifier).fetchHardwareState();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Telemetry refreshed',
-                        style: GoogleFonts.plusJakartaSans(
-                          color: isDark ? Colors.black : Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                      backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                      duration: const Duration(seconds: 1),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
-              icon: Icon(
-                Icons.refresh_rounded,
-                color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                size: 20,
-              ),
-            ),
-          ),
           // Theme Toggle
           Container(
-            margin: const EdgeInsets.only(right: 6),
+            margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
               color: bgSurface,
               shape: BoxShape.circle,
@@ -148,7 +113,12 @@ class _TelemetryScreenState extends ConsumerState<TelemetryScreen> {
             ),
             child: IconButton(
               tooltip: 'Settings & Hardware Config',
-              onPressed: () => showAppControlsBottomSheet(context, ref),
+              onPressed: widget.onOpenSettings ?? () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              },
               icon: Icon(Icons.settings_outlined, color: textSec, size: 20),
             ),
           ),

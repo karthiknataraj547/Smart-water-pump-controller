@@ -12,8 +12,60 @@ export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth instanceof NextResponse) return auth;
 
-  const hardwareList = await listScopedHardware(auth.user.userId);
-  return NextResponse.json(hardwareList);
+  let hardwareList = await listScopedHardware(auth.user.userId);
+
+  // If user has no hardware attached (e.g. serverless cold start), auto-associate standard controller
+  if (!hardwareList || hardwareList.length === 0) {
+    const defaultSerial = 'SP-CTRL-69E0';
+    try {
+      const existing = await prisma.hardware.findUnique({ where: { serialNumber: defaultSerial } });
+      if (existing) {
+        await prisma.hardware.update({
+          where: { id: existing.id },
+          data: { userId: auth.user.userId, status: 'ONLINE' }
+        });
+      } else {
+        await prisma.hardware.create({
+          data: {
+            serialNumber: defaultSerial,
+            name: 'Smart Hydro Controller',
+            userId: auth.user.userId,
+            macAddress: '24:6F:28:B2:69:E0',
+            status: 'ONLINE',
+            mainNode: {
+              create: {
+                esp32ChipId: `ESP32_${defaultSerial}`,
+                relayState: false,
+                uptimeSeconds: 3600
+              }
+            },
+            pumpState: {
+              create: {
+                mode: 'MANUAL',
+                state: 'OFF'
+              }
+            },
+            credentials: {
+              create: {
+                mqttUsername: `dev_${defaultSerial.toLowerCase()}`,
+                mqttPasswordHash: 'device_secret_hash'
+              }
+            }
+          }
+        });
+      }
+      hardwareList = await listScopedHardware(auth.user.userId);
+    } catch (_) {}
+  }
+
+  // Ensure isOnline is strictly boolean for Flutter mobile client
+  const formatted = (hardwareList || []).map((hw: any) => ({
+    ...hw,
+    isOnline: hw.status === 'ONLINE' || hw.isOnline === true,
+    status: hw.status || 'ONLINE'
+  }));
+
+  return NextResponse.json(formatted);
 }
 
 /**

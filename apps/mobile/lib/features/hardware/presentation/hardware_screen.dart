@@ -5,10 +5,12 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/auth/auth_provider.dart';
 import '../../../core/pump/pump_provider.dart';
-import '../../../shared/dialogs/app_controls_sheet.dart';
+import '../../settings/presentation/settings_screen.dart';
 
 class HardwareScreen extends ConsumerStatefulWidget {
-  const HardwareScreen({super.key});
+  final VoidCallback? onOpenSettings;
+
+  const HardwareScreen({super.key, this.onOpenSettings});
 
   @override
   ConsumerState<HardwareScreen> createState() => _HardwareScreenState();
@@ -16,6 +18,79 @@ class HardwareScreen extends ConsumerStatefulWidget {
 
 class _HardwareScreenState extends ConsumerState<HardwareScreen> {
   bool _isMainNodeExpanded = false;
+
+  void _confirmAndRebootHardware(BuildContext context, bool isDark) {
+    final bgSurface = isDark ? AppColors.darkSurface : AppColors.lightSurface;
+    final textPrim = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+    final textSec = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: bgSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            const Icon(Icons.restart_alt_rounded, color: AppColors.cyanPrimary, size: 24),
+            const SizedBox(width: 10),
+            Text(
+              'Remote Hardware Reset',
+              style: GoogleFonts.plusJakartaSans(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+                color: textPrim,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Remotely reboot ESP32 controller gateway over MQTT? The hardware will safely isolate the relay and restart automatically without pressing any physical buttons.',
+          style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textSec, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.plusJakartaSans(color: textSec, fontWeight: FontWeight.w700)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Transmitting REBOOT command to controller via MQTT...',
+                    style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+                  ),
+                  backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+              await ref.read(pumpProvider.notifier).rebootHardware();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Reboot signal dispatched. Hardware restarting...',
+                      style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+                    ),
+                    backgroundColor: AppColors.emeraldSuccess,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+              foregroundColor: isDark ? Colors.black : Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text('Reboot Controller', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _confirmRemoveDevice(BuildContext context) {
     final isDark = ref.read(themeModeProvider) == ThemeMode.dark;
@@ -111,46 +186,9 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
           style: GoogleFonts.plusJakartaSans(color: textPrim, fontWeight: FontWeight.w800, fontSize: 20),
         ),
         actions: [
-          // Refresh Hardware State Button
-          Container(
-            margin: const EdgeInsets.only(right: 6),
-            decoration: BoxDecoration(
-              color: bgSurface,
-              shape: BoxShape.circle,
-              border: Border.all(color: borderCol),
-            ),
-            child: IconButton(
-              tooltip: 'Refresh Hardware Topology',
-              onPressed: () async {
-                await ref.read(pumpProvider.notifier).fetchHardwareState();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Hardware topology refreshed',
-                        style: GoogleFonts.plusJakartaSans(
-                          color: isDark ? Colors.black : Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                      backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                      duration: const Duration(seconds: 1),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
-              icon: Icon(
-                Icons.refresh_rounded,
-                color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                size: 20,
-              ),
-            ),
-          ),
           // Theme Toggle Button beside Settings
           Container(
-            margin: const EdgeInsets.only(right: 6),
+            margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
               color: bgSurface,
               shape: BoxShape.circle,
@@ -174,8 +212,13 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
               border: Border.all(color: borderCol),
             ),
             child: IconButton(
-              tooltip: 'Settings & Controls',
-              onPressed: () => showAppControlsBottomSheet(context, ref),
+              tooltip: 'Settings & Hardware Config',
+              onPressed: widget.onOpenSettings ?? () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              },
               icon: Icon(Icons.settings_outlined, color: textSec, size: 20),
             ),
           ),
@@ -191,7 +234,85 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
           physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           children: [
-          // === UNIFIED DUAL-NODE MESH CARD (MAIN NODE + SUB NODE IN ONE CARD) ===
+            // === REMOTE HARDWARE RESET / REBOOT CARD ===
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: bgSurface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: borderCol),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: (isDark ? AppColors.cyanPrimary : AppColors.blueElectric).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.restart_alt_rounded,
+                      color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Remote Controller Reset',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
+                            color: textPrim,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Reboot hardware over MQTT without physical buttons',
+                          style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: () => _confirmAndRebootHardware(context, isDark),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFEFF6FF),
+                      foregroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                      elevation: 0,
+                      side: BorderSide(
+                        color: (isDark ? AppColors.cyanPrimary : AppColors.blueElectric).withValues(alpha: 0.4),
+                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    ),
+                    child: Text(
+                      'RESET',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // === UNIFIED DUAL-NODE MESH CARD (MAIN NODE + SUB NODE IN ONE CARD) ===
           Container(
             decoration: BoxDecoration(
               color: bgSurface,

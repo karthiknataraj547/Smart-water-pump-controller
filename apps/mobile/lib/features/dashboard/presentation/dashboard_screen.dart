@@ -4,14 +4,15 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/pump/pump_provider.dart';
-import '../../../shared/dialogs/app_controls_sheet.dart';
 import '../../../shared/spatial_canvas/tank_pump_flow_canvas.dart';
+import '../../settings/presentation/settings_screen.dart';
 import 'widgets/dashboard_analytics_curve_card.dart';
 
 class DashboardScreen extends ConsumerWidget {
   final void Function(int)? onNavigateTab;
+  final VoidCallback? onOpenSettings;
 
-  const DashboardScreen({super.key, this.onNavigateTab});
+  const DashboardScreen({super.key, this.onNavigateTab, this.onOpenSettings});
 
   String _getGreeting() {
     final hour = DateTime.now().hour;
@@ -279,42 +280,9 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
         actions: [
-          // Manual Page Refresh Button
-          Container(
-            margin: const EdgeInsets.only(right: 6),
-            decoration: BoxDecoration(
-              color: bgSurface,
-              shape: BoxShape.circle,
-              border: Border.all(color: borderCol),
-            ),
-            child: IconButton(
-              tooltip: 'Refresh Hardware Telemetry',
-              onPressed: () async {
-                await ref.read(pumpProvider.notifier).fetchHardwareState();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Hardware telemetry refreshed',
-                        style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
-                      ),
-                      duration: const Duration(seconds: 1),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
-              icon: Icon(
-                Icons.refresh_rounded,
-                color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                size: 20,
-              ),
-            ),
-          ),
-
           // Theme Toggle Button (Light / Dark)
           Container(
-            margin: const EdgeInsets.only(right: 6),
+            margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
               color: bgSurface,
               shape: BoxShape.circle,
@@ -331,7 +299,7 @@ class DashboardScreen extends ConsumerWidget {
             ),
           ),
 
-          // Settings Button
+          // Settings Button (Opens full Settings & Device Configuration)
           Container(
             margin: const EdgeInsets.only(right: 18),
             decoration: BoxDecoration(
@@ -341,7 +309,14 @@ class DashboardScreen extends ConsumerWidget {
             ),
             child: IconButton(
               tooltip: 'Settings & Hardware Config',
-              onPressed: () => showAppControlsBottomSheet(context, ref),
+              onPressed: onOpenSettings ?? () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsScreen(onNavigateTab: onNavigateTab),
+                  ),
+                );
+              },
               icon: Icon(Icons.settings_outlined, color: textSec, size: 20),
             ),
           ),
@@ -564,167 +539,210 @@ class DashboardScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 12),
 
-                  // 3. MODES SELECTOR: [ MANUAL | AUTO ]
-                  Container(
-                    height: 44,
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: bgElevated,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: borderCol),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () => ref.read(pumpProvider.notifier).setMode(PumpMode.manual),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: pump.mode == PumpMode.manual
-                                    ? (isDark ? AppColors.darkSurface : Colors.white)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(11),
-                                boxShadow: pump.mode == PumpMode.manual
-                                    ? [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4)]
-                                    : null,
-                                border: pump.mode == PumpMode.manual
-                                    ? Border.all(color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric, width: 1.2)
-                                    : null,
+                  // OFFLINE CONTROLS FROZEN BANNER
+                  if (!pump.isOnline) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.35)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lock_clock_rounded, color: Color(0xFFEF4444), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Device is offline. Remote controls and actuators are frozen until connection is restored.',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFFEF4444),
                               ),
-                              alignment: Alignment.center,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.touch_app_rounded,
-                                    size: 15,
-                                    color: pump.mode == PumpMode.manual
-                                        ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
-                                        : textSec,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'MANUAL',
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 11,
-                                      fontWeight: pump.mode == PumpMode.manual ? FontWeight.w800 : FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  // 3. MODES SELECTOR: [ MANUAL | AUTO ]
+                  Opacity(
+                    opacity: pump.isOnline ? 1.0 : 0.45,
+                    child: Container(
+                      height: 44,
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: bgElevated,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: borderCol),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: !pump.isOnline ? null : () => ref.read(pumpProvider.notifier).setMode(PumpMode.manual),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: pump.mode == PumpMode.manual
+                                      ? (isDark ? AppColors.darkSurface : Colors.white)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(11),
+                                  boxShadow: pump.mode == PumpMode.manual
+                                      ? [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4)]
+                                      : null,
+                                  border: pump.mode == PumpMode.manual
+                                      ? Border.all(color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric, width: 1.2)
+                                      : null,
+                                ),
+                                alignment: Alignment.center,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.touch_app_rounded,
+                                      size: 15,
                                       color: pump.mode == PumpMode.manual
                                           ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
                                           : textSec,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'MANUAL',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 11,
+                                        fontWeight: pump.mode == PumpMode.manual ? FontWeight.w800 : FontWeight.w600,
+                                        color: pump.mode == PumpMode.manual
+                                            ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
+                                            : textSec,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () => ref.read(pumpProvider.notifier).setMode(PumpMode.auto),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: pump.mode == PumpMode.auto
-                                    ? (isDark ? AppColors.darkSurface : Colors.white)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(11),
-                                boxShadow: pump.mode == PumpMode.auto
-                                    ? [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4)]
-                                    : null,
-                                border: pump.mode == PumpMode.auto
-                                    ? Border.all(color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric, width: 1.2)
-                                    : null,
-                              ),
-                              alignment: Alignment.center,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.tune_rounded,
-                                    size: 15,
-                                    color: pump.mode == PumpMode.auto
-                                        ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
-                                        : textSec,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'AUTO',
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 11,
-                                      fontWeight: pump.mode == PumpMode.auto ? FontWeight.w800 : FontWeight.w600,
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: !pump.isOnline ? null : () => ref.read(pumpProvider.notifier).setMode(PumpMode.auto),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: pump.mode == PumpMode.auto
+                                      ? (isDark ? AppColors.darkSurface : Colors.white)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(11),
+                                  boxShadow: pump.mode == PumpMode.auto
+                                      ? [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4)]
+                                      : null,
+                                  border: pump.mode == PumpMode.auto
+                                      ? Border.all(color: isDark ? AppColors.cyanPrimary : AppColors.blueElectric, width: 1.2)
+                                      : null,
+                                ),
+                                alignment: Alignment.center,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.tune_rounded,
+                                      size: 15,
                                       color: pump.mode == PumpMode.auto
                                           ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
                                           : textSec,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'AUTO',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 11,
+                                        fontWeight: pump.mode == PumpMode.auto ? FontWeight.w800 : FontWeight.w600,
+                                        color: pump.mode == PumpMode.auto
+                                            ? (isDark ? AppColors.cyanPrimary : AppColors.blueElectric)
+                                            : textSec,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
 
                   // 4. START / STOP CONTROLS (ONLY IN MANUAL MODE!)
                   if (pump.mode == PumpMode.manual) ...[
-                    Row(
-                      children: [
-                        // START BUTTON
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: ElevatedButton(
-                              onPressed: (!pump.isRunning && !pump.isEmergencyStopped && !pump.isStarting)
-                                  ? () => ref.read(pumpProvider.notifier).startPump()
-                                  : null,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
-                                foregroundColor: isDark ? Colors.black : Colors.white,
-                                elevation: pump.isRunning ? 0 : 3,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    Opacity(
+                      opacity: pump.isOnline ? 1.0 : 0.45,
+                      child: Row(
+                        children: [
+                          // START BUTTON
+                          Expanded(
+                            child: SizedBox(
+                              height: 48,
+                              child: ElevatedButton(
+                                onPressed: (pump.isOnline && !pump.isRunning && !pump.isEmergencyStopped && !pump.isStarting)
+                                    ? () => ref.read(pumpProvider.notifier).startPump()
+                                    : null,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: isDark ? AppColors.cyanPrimary : AppColors.blueElectric,
+                                  foregroundColor: isDark ? Colors.black : Colors.white,
+                                  disabledBackgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                  disabledForegroundColor: isDark ? Colors.white38 : Colors.black38,
+                                  elevation: pump.isRunning ? 0 : 3,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                ),
+                                child: pump.isStarting
+                                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(pump.isOnline ? Icons.play_arrow_rounded : Icons.lock_outline_rounded, size: 20),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            pump.isOnline ? 'START' : 'LOCKED',
+                                            style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+                                          ),
+                                        ],
+                                      ),
                               ),
-                              child: pump.isStarting
-                                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                  : Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(Icons.play_arrow_rounded, size: 20),
-                                        const SizedBox(width: 4),
-                                        Text('START', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
-                                      ],
-                                    ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 10),
+                          const SizedBox(width: 10),
 
-                        // STOP BUTTON
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: ElevatedButton(
-                              onPressed: (pump.isRunning && !pump.isEmergencyStopped)
-                                  ? () => ref.read(pumpProvider.notifier).stopPump()
-                                  : null,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFEF4444),
-                                foregroundColor: Colors.white,
-                                elevation: pump.isRunning ? 3 : 0,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.stop_rounded, size: 20),
-                                  const SizedBox(width: 4),
-                                  Text('STOP', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
-                                ],
+                          // STOP BUTTON
+                          Expanded(
+                            child: SizedBox(
+                              height: 48,
+                              child: ElevatedButton(
+                                onPressed: (pump.isOnline && pump.isRunning && !pump.isEmergencyStopped)
+                                    ? () => ref.read(pumpProvider.notifier).stopPump()
+                                    : null,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFEF4444),
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                  disabledForegroundColor: isDark ? Colors.white38 : Colors.black38,
+                                  elevation: pump.isRunning ? 3 : 0,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.stop_rounded, size: 20),
+                                    const SizedBox(width: 4),
+                                    Text('STOP', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 12),
                   ] else ...[
@@ -772,22 +790,28 @@ class DashboardScreen extends ConsumerWidget {
                   ],
 
                   // 5. EMERGENCY STOP BUTTON (AVAILABLE IN BOTH MODES!)
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      onPressed: pump.isEmergencyStopped
-                          ? () => _handleClearEmergency(context, ref)
-                          : () => _handleEmergencyStop(context, ref),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: pump.isEmergencyStopped
-                            ? const Color(0xFFF59E0B)
-                            : AppColors.crimsonError,
-                        foregroundColor: Colors.white,
-                        elevation: 3,
-                        shadowColor: AppColors.crimsonError.withValues(alpha: 0.4),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
+                  Opacity(
+                    opacity: pump.isOnline ? 1.0 : 0.45,
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: !pump.isOnline
+                            ? null
+                            : (pump.isEmergencyStopped
+                                ? () => _handleClearEmergency(context, ref)
+                                : () => _handleEmergencyStop(context, ref)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: pump.isEmergencyStopped
+                              ? const Color(0xFFF59E0B)
+                              : AppColors.crimsonError,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                          disabledForegroundColor: isDark ? Colors.white38 : Colors.black38,
+                          elevation: pump.isOnline ? 3 : 0,
+                          shadowColor: AppColors.crimsonError.withValues(alpha: 0.4),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -804,8 +828,9 @@ class DashboardScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
             ),
             const SizedBox(height: 18),
 
