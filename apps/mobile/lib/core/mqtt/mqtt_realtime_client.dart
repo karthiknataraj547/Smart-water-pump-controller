@@ -7,6 +7,7 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 typedef DeviceStatusCallback = void Function(String serialNumber, bool isOnline);
 typedef DeviceHeartbeatCallback = void Function(String serialNumber, Map<String, dynamic> data);
 typedef DeviceTelemetryCallback = void Function(String serialNumber, Map<String, dynamic> data);
+typedef DeviceAckCallback = void Function(String serialNumber, Map<String, dynamic> data);
 
 class MqttRealtimeClient {
   static final MqttRealtimeClient instance = MqttRealtimeClient._internal();
@@ -20,12 +21,30 @@ class MqttRealtimeClient {
 
   final Map<String, bool> _deviceStatus = {};
   final Map<String, DateTime> _lastSeen = {};
+  final Map<String, String> _deviceUserIds = {};
 
   DeviceStatusCallback? onStatusUpdate;
   DeviceHeartbeatCallback? onHeartbeatUpdate;
   DeviceTelemetryCallback? onTelemetryUpdate;
+  DeviceAckCallback? onAckUpdate;
 
   bool get isConnected => _isConnected;
+
+  /// Returns the most recently seen active physical serial number
+  String? get activeOnlineSerial {
+    String? latestSerial;
+    DateTime? latestTime;
+    for (final entry in _deviceStatus.entries) {
+      if (entry.value) {
+        final seen = _lastSeen[entry.key];
+        if (latestTime == null || (seen != null && seen.isAfter(latestTime))) {
+          latestTime = seen;
+          latestSerial = entry.key;
+        }
+      }
+    }
+    return latestSerial;
+  }
 
   bool hasReceivedStatusFor(String serialNumber) {
     if (_deviceStatus.containsKey(serialNumber)) return true;
@@ -132,14 +151,14 @@ class MqttRealtimeClient {
 
   void _startWatchdog() {
     _watchdogTimer?.cancel();
-    // Heartbeat timeout watchdog: if a device marked online doesn't ping for > 15s, mark offline
-    _watchdogTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    // Heartbeat timeout watchdog: if a device marked online doesn't ping for > 20s, mark offline
+    _watchdogTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       final now = DateTime.now();
       for (final entry in _lastSeen.entries) {
         final serial = entry.key;
         final last = entry.value;
-        if (_deviceStatus[serial] == true && now.difference(last).inSeconds > 15) {
-          debugPrint('[MQTT-Watchdog] Device $serial heartbeat timeout (>15s). Marking OFFLINE.');
+        if (_deviceStatus[serial] == true && now.difference(last).inSeconds > 20) {
+          debugPrint('[MQTT-Watchdog] Device $serial heartbeat timeout (>20s). Marking OFFLINE.');
           _deviceStatus[serial] = false;
           onStatusUpdate?.call(serial, false);
         }
@@ -153,10 +172,12 @@ class MqttRealtimeClient {
       _client!.subscribe('users/+/devices/+/status', MqttQos.atLeastOnce);
       _client!.subscribe('users/+/devices/+/heartbeat', MqttQos.atLeastOnce);
       _client!.subscribe('users/+/devices/+/telemetry', MqttQos.atLeastOnce);
+      _client!.subscribe('users/+/devices/+/ack', MqttQos.atLeastOnce);
       _client!.subscribe('devices/+/status', MqttQos.atLeastOnce);
       _client!.subscribe('devices/+/heartbeat', MqttQos.atLeastOnce);
       _client!.subscribe('devices/+/telemetry', MqttQos.atLeastOnce);
-      debugPrint('[MQTT] Subscribed to real-time hardware status & heartbeat topics.');
+      _client!.subscribe('devices/+/ack', MqttQos.atLeastOnce);
+      debugPrint('[MQTT] Subscribed to real-time hardware status, heartbeat, telemetry & ACK topics.');
     } catch (e) {
       debugPrint('[MQTT] Subscription error: $e');
     }
@@ -184,7 +205,11 @@ class MqttRealtimeClient {
 
     // users/{userId}/devices/{serialNumber}/status
     if (parts.length >= 5 && parts[0] == 'users' && parts[2] == 'devices') {
+      final uid = parts[1];
       serialNumber = parts[3];
+      if (uid.isNotEmpty && uid != '+' && uid != '#') {
+        _deviceUserIds[serialNumber] = uid;
+      }
     } else if (parts.length >= 3 && parts[0] == 'devices') {
       serialNumber = parts[1];
     }
@@ -214,6 +239,14 @@ class MqttRealtimeClient {
         _lastSeen[serialNumber] = DateTime.now();
         onStatusUpdate?.call(serialNumber, true);
         onTelemetryUpdate?.call(serialNumber, data);
+      } catch (_) {}
+    } else if (topic.endsWith('/ack')) {
+      try {
+        final data = jsonDecode(payload) as Map<String, dynamic>;
+        _deviceStatus[serialNumber] = true;
+        _lastSeen[serialNumber] = DateTime.now();
+        onAckUpdate?.call(serialNumber, data);
+        debugPrint('[MQTT] Received command ACK from $serialNumber: $payload');
       } catch (_) {}
     }
   }
@@ -246,30 +279,63 @@ class MqttRealtimeClient {
       final payloadData = builder.payload;
       if (payloadData == null) return false;
 
-      // Publish to direct device command topic
-      _client!.publishMessage(
-        'devices/$serialNumber/command',
-        MqttQos.atLeastOnce,
-        payloadData,
-      );
+      // Determine all candidate target serial numbers
+      final targetSerials = <String>{serialNumber};
+      for (final entry in _deviceStatus.entries) {
+        if (entry.value && entry.key.isNotEmpty) {
+          targetSerials.add(entry.key);
+        }
+      }
+      if (activeOnlineSerial != null) {
+        targetSerials.add(activeOnlineSerial!);
+      }
 
-      // Also publish to user-scoped command topic if userId is available
-      if (userId != null && userId.isNotEmpty) {
+      // Publish to valid MQTT topics for each candidate serial
+      // (NEVER publish to wildcard topics like users/+/devices/... as MQTT spec forbids wildcards in publish)
+      for (final s in targetSerials) {
+        // 1. Direct device topic
         _client!.publishMessage(
-          'users/$userId/devices/$serialNumber/command',
+          'devices/$s/command',
           MqttQos.atLeastOnce,
           payloadData,
         );
+
+        // 2. Unclaimed fallback topic (firmware default when not BLE claimed)
+        _client!.publishMessage(
+          'users/unclaimed/devices/$s/command',
+          MqttQos.atLeastOnce,
+          payloadData,
+        );
+
+        // 3. User-scoped app token (triggers firmware's users/+/devices/{serial}/command subscription)
+        _client!.publishMessage(
+          'users/app/devices/$s/command',
+          MqttQos.atLeastOnce,
+          payloadData,
+        );
+
+        // 4. Detected user ID from device packets if known
+        final detectedUser = _deviceUserIds[s];
+        if (detectedUser != null && detectedUser.isNotEmpty && detectedUser != 'unclaimed' && detectedUser != 'app') {
+          _client!.publishMessage(
+            'users/$detectedUser/devices/$s/command',
+            MqttQos.atLeastOnce,
+            payloadData,
+          );
+        }
+
+        // 5. Auth-provided user ID if available
+        if (userId != null && userId.isNotEmpty && userId != detectedUser) {
+          _client!.publishMessage(
+            'users/$userId/devices/$s/command',
+            MqttQos.atLeastOnce,
+            payloadData,
+          );
+        }
+
+        debugPrint('[MQTT] Command $command dispatched to device topics for serial $s');
       }
 
-      // Also publish with wildcard user topic
-      _client!.publishMessage(
-        'users/+/devices/$serialNumber/command',
-        MqttQos.atLeastOnce,
-        payloadData,
-      );
-
-      debugPrint('[MQTT] Command $command published for $serialNumber');
       return true;
     } catch (e) {
       debugPrint('[MQTT] Failed to publish command $command: $e');

@@ -46,6 +46,21 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
   });
 
+  // Mutate pumpState to OFF and reset flow rate
+  await prisma.pumpState.upsert({
+    where: { hardwareId: hardware.id },
+    create: {
+      hardwareId: hardware.id,
+      state: 'OFF',
+      mode: 'MANUAL',
+      currentFlowRateLpm: 0.0
+    },
+    update: {
+      state: 'OFF',
+      currentFlowRateLpm: 0.0
+    }
+  });
+
   return NextResponse.json(
     {
       commandId,

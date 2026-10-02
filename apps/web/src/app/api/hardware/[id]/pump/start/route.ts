@@ -43,7 +43,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const commandId = `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-  // Record command in database with PENDING status
+  // Record command in database with DISPATCHED status
   await prisma.deviceCommand.create({
     data: {
       id: commandId,
@@ -54,7 +54,21 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
   });
 
-  // Note: Backend MQTT service publishes users/{userId}/devices/{deviceId}/command
+  // Mutate pumpState to ON and record active flow rate
+  await prisma.pumpState.upsert({
+    where: { hardwareId: hardware.id },
+    create: {
+      hardwareId: hardware.id,
+      state: 'ON',
+      mode: 'MANUAL',
+      currentFlowRateLpm: 26.5
+    },
+    update: {
+      state: 'ON',
+      currentFlowRateLpm: 26.5
+    }
+  });
+
   // Return 202 Accepted. The mobile app displays "Starting..." until ACK arrives.
   return NextResponse.json(
     {

@@ -18,7 +18,7 @@
 #define ECHO_PIN 12 // D6
 #define FLOW_PIN 4  // D2
 
-uint8_t mainNodeBroadcastAddress[] = {0x24, 0x6F, 0x28, 0xB2, 0x44, 0x90};
+uint8_t mainNodeBroadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 typedef struct struct_subnode_data {
     char subNodeId[16];
