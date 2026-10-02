@@ -114,6 +114,11 @@ typedef struct struct_subnode_data {
 
 struct_subnode_data incomingSensorData;
 
+// Sub-Node ESP-NOW connection tracking
+unsigned long lastSubNodePacket = 0;
+bool subNodeConnected = false;
+#define SUBNODE_TIMEOUT_MS 15000  // 15 seconds without ESP-NOW = sub-node offline
+
 // BLE Server Callbacks
 class MyServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -342,6 +347,8 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
 #endif
     (void)mac;
     memcpy(&incomingSensorData, incomingData, sizeof(incomingSensorData));
+    lastSubNodePacket = millis();
+    subNodeConnected = true;
 
     const char* uid = (strlen(registeredUserId) > 0) ? registeredUserId : "unclaimed";
 
@@ -751,19 +758,16 @@ void loop() {
         lastHeartbeat = millis();
         const char* uid = (strlen(registeredUserId) > 0) ? registeredUserId : "unclaimed";
 
-        // Determine effective sensor readings
-        float effectiveLevelPct = incomingSensorData.waterLevelPct;
-        float effectiveFlowLpm = incomingSensorData.flowRateLpm;
-        float effectiveTds = incomingSensorData.tdsPpm;
+        // Track Sub-Node ESP-NOW connection freshness
+        subNodeConnected = (lastSubNodePacket > 0) && ((millis() - lastSubNodePacket) < SUBNODE_TIMEOUT_MS);
 
-        // If no sub-node ESP-NOW packet has arrived yet (or standalone bench testing), provide calibrated defaults
-        if (effectiveLevelPct <= 0.0f) {
-            effectiveLevelPct = 76.5f;
-            effectiveTds = 142.0f;
-        }
-        if (relayActive) {
-            if (effectiveFlowLpm <= 0.0f) effectiveFlowLpm = 26.5f;
-        } else {
+        // Use REAL sensor readings only — no mock data
+        float effectiveLevelPct = subNodeConnected ? incomingSensorData.waterLevelPct : 0.0f;
+        float effectiveFlowLpm = subNodeConnected ? incomingSensorData.flowRateLpm : 0.0f;
+        float effectiveTds = subNodeConnected ? incomingSensorData.tdsPpm : 0.0f;
+
+        // Flow is 0 when relay is off regardless
+        if (!relayActive) {
             effectiveFlowLpm = 0.0f;
         }
 
@@ -781,6 +785,7 @@ void loop() {
         hb["motorHp"] = motorHp;
         hb["pumpState"] = relayActive ? "ON" : "OFF";
         hb["status"] = "ONLINE";
+        hb["subNodeConnected"] = subNodeConnected;
         hb["tankLevelPct"] = effectiveLevelPct;
         hb["waterVolumeLiters"] = effectiveVolumeL;
         hb["flowRateLpm"] = effectiveFlowLpm;

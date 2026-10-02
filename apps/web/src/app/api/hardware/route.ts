@@ -63,17 +63,8 @@ export async function GET(req: NextRequest) {
   const formatted = (hardwareList || []).map((hw: any) => {
     const lastHb = hw.lastHeartbeat ? new Date(hw.lastHeartbeat).getTime() : 0;
     const isOnline = lastHb > 0 && (now - lastHb) < 75000;
-    const isPumpRunning = hw.pumpState?.state === 'ON';
-    const capacity = hw.tankCapacityLiters || 1000;
-    const latestSensorReading = hw.latestSensorReading || {
-      tankLevelPct: 76.5,
-      waterVolumeL: Math.round(capacity * 0.765),
-      flowRateLpm: isPumpRunning ? 26.5 : 0.0,
-      tdsPpm: 142,
-      waterTempC: 24.8,
-      phLevel: 7.2,
-      recordedAt: new Date().toISOString()
-    };
+    // Return actual sensor reading only — no mock fallback data
+    const latestSensorReading = hw.latestSensorReading || null;
 
     return {
       ...hw,

@@ -106,6 +106,7 @@ class PumpState {
   final bool isStopping;
   final bool isOnline;
   final bool hasRealData;
+  final bool isSubNodeOnline;
   final String? hardwareId;
   final String? serialNumber;
   final String? hardwareName;
@@ -155,6 +156,7 @@ class PumpState {
     this.isStopping = false,
     this.isOnline = false,
     this.hasRealData = false,
+    this.isSubNodeOnline = false,
     this.hardwareId,
     this.serialNumber,
     this.hardwareName,
@@ -199,6 +201,7 @@ class PumpState {
     bool? isStopping,
     bool? isOnline,
     bool? hasRealData,
+    bool? isSubNodeOnline,
     String? hardwareId,
     String? serialNumber,
     String? hardwareName,
@@ -242,6 +245,7 @@ class PumpState {
       isStopping: isStopping ?? this.isStopping,
       isOnline: isOnline ?? this.isOnline,
       hasRealData: hasRealData ?? this.hasRealData,
+      isSubNodeOnline: isSubNodeOnline ?? this.isSubNodeOnline,
       hardwareId: hardwareId ?? this.hardwareId,
       serialNumber: serialNumber ?? this.serialNumber,
       hardwareName: hardwareName ?? this.hardwareName,
@@ -320,7 +324,10 @@ class PumpNotifier extends StateNotifier<PumpState> {
       final isRunning = pState == 'ON';
       final rssi = (data['wifiRssi'] as num?)?.toInt() ?? state.wifiRssi;
 
-      // Extract sensor metrics if available in heartbeat
+      // Sub-Node connection status from firmware
+      final subNodeOnline = data['subNodeConnected'] == true;
+
+      // Extract sensor metrics — only trust them if sub-node is online
       final level = (data['tankLevelPct'] as num?)?.toDouble();
       final vol = (data['waterVolumeLiters'] as num?)?.toDouble();
       final flow = (data['flowRateLpm'] as num?)?.toDouble();
@@ -331,31 +338,32 @@ class PumpNotifier extends StateNotifier<PumpState> {
       final int effectiveTds;
       final bool hasData;
 
-      if (level != null && level > 0) {
+      if (subNodeOnline && level != null && level > 0) {
         effectiveLevel = level;
         effectiveVol = vol ?? (level * 10.0);
-        effectiveTds = tds ?? state.tdsPpm;
+        effectiveTds = tds ?? 0;
         hasData = true;
-      } else if (state.hasRealData && state.tankLevelPct > 0) {
+      } else if (subNodeOnline && state.hasRealData && state.tankLevelPct > 0) {
         effectiveLevel = state.tankLevelPct;
         effectiveVol = state.waterVolumeLiters;
         effectiveTds = state.tdsPpm;
         hasData = true;
       } else {
-        // Calibrated baseline for active hardware so UI does not show 0%
-        effectiveLevel = 76.5;
-        effectiveVol = 765.0;
-        effectiveTds = 142;
-        hasData = true;
+        // No sub-node — report zeros (no mock data)
+        effectiveLevel = 0.0;
+        effectiveVol = 0.0;
+        effectiveTds = 0;
+        hasData = false;
       }
 
-      final effectiveFlow = isRunning ? (flow ?? (hasData ? 26.5 : 0.0)) : 0.0;
+      final effectiveFlow = isRunning ? (flow ?? 0.0) : 0.0;
 
       state = state.copyWith(
         isOnline: true,
         serialNumber: activeSerial,
         isRunning: isRunning,
         wifiRssi: rssi,
+        isSubNodeOnline: subNodeOnline,
         hasRealData: hasData,
         tankLevelPct: effectiveLevel,
         waterVolumeLiters: effectiveVol,
@@ -366,7 +374,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
       );
     };
 
-    // 3. Real-time sensor telemetry from physical ESP32
+    // 3. Real-time sensor telemetry from physical ESP32 (sub-node relay)
     MqttRealtimeClient.instance.onTelemetryUpdate = (serial, data) {
       final activeSerial = (serial.isNotEmpty && !serial.contains('+') && !serial.contains('#'))
           ? serial
@@ -379,14 +387,16 @@ class PumpNotifier extends StateNotifier<PumpState> {
       final pState = (data['pumpState'] as String?)?.toUpperCase();
       final isRunning = pState != null ? (pState == 'ON') : state.isRunning;
 
+      // Telemetry only arrives when sub-node is connected
       state = state.copyWith(
         isOnline: true,
         serialNumber: activeSerial,
+        isSubNodeOnline: true,
         hasRealData: true,
-        tankLevelPct: level > 0 ? level : 76.5,
-        waterVolumeLiters: vol > 0 ? vol : 765.0,
-        flowRateLpm: isRunning ? (flow > 0 ? flow : 26.5) : 0.0,
-        tdsPpm: tds > 0 ? tds : 142,
+        tankLevelPct: level,
+        waterVolumeLiters: vol,
+        flowRateLpm: isRunning ? flow : 0.0,
+        tdsPpm: tds,
         isRunning: isRunning,
         motorRpm: isRunning ? 2850 : 0,
         powerWatts: isRunning ? 1120.0 : 0.0,
@@ -408,7 +418,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
           isRunning: isRunning,
           isStarting: false,
           isStopping: false,
-          flowRateLpm: isRunning ? 26.5 : 0.0,
+          flowRateLpm: isRunning ? state.flowRateLpm : 0.0,
           motorRpm: isRunning ? 2850 : 0,
           powerWatts: isRunning ? 1120.0 : 0.0,
         );
@@ -463,7 +473,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
           isPumpOn = state.isRunning;
         }
 
-        final flowRate = (pState?['currentFlowRateLpm'] as num?)?.toDouble() ?? (isPumpOn ? 26.5 : 0.0);
+        final flowRate = (pState?['currentFlowRateLpm'] as num?)?.toDouble() ?? (isPumpOn ? state.flowRateLpm : 0.0);
         final rssi = (hw['wifiRssi'] as num?)?.toInt() ?? state.wifiRssi;
 
         final sensor = hw['latestSensorReading'] as Map<String, dynamic>?;
@@ -477,12 +487,8 @@ class PumpNotifier extends StateNotifier<PumpState> {
           volume = (sensor['waterVolumeL'] as num?)?.toDouble() ?? volume;
           tds = (sensor['tdsPpm'] as num?)?.toInt() ?? tds;
           hasData = true;
-        } else if (level <= 0.0 && isOnline) {
-          level = 76.5;
-          volume = 765.0;
-          tds = 142;
-          hasData = true;
         }
+        // No mock fallback — if no sensor reading, keep existing state or zeros
 
         PumpMode resolvedMode = state.mode;
         if (pModeStr == 'auto') {
@@ -501,12 +507,12 @@ class PumpNotifier extends StateNotifier<PumpState> {
           isEmergencyStopped: isEmergency,
           isRunning: isPumpOn,
           mode: resolvedMode,
-          flowRateLpm: isPumpOn ? (flowRate > 0 ? flowRate : (hasData ? flowRate : 26.5)) : 0.0,
+          flowRateLpm: isPumpOn ? flowRate : 0.0,
           powerWatts: isPumpOn ? 1120.0 : 0.0,
           motorRpm: isPumpOn ? 2850 : 0,
-          tankLevelPct: level > 0 ? level : 76.5,
-          waterVolumeLiters: volume > 0 ? volume : 765.0,
-          tdsPpm: tds > 0 ? tds : 142,
+          tankLevelPct: level,
+          waterVolumeLiters: volume,
+          tdsPpm: tds,
           hasRealData: hasData,
           wifiRssi: rssi,
         );
@@ -534,40 +540,37 @@ class PumpNotifier extends StateNotifier<PumpState> {
     if (state.mode == PumpMode.auto) return;
 
     _lastManualCommandTime = DateTime.now();
-    state = state.copyWith(isStarting: true);
 
-    try {
-      final sNum = MqttRealtimeClient.instance.activeOnlineSerial ?? state.serialNumber ?? 'SP-CTRL-69E0';
-      final uid = _ref?.read(authProvider).userId;
+    // INSTANT optimistic state update (<10ms) — no waiting for network
+    state = state.copyWith(
+      isStarting: false,
+      isRunning: true,
+      motorRpm: 2850,
+      powerWatts: 1120.0,
+    );
 
-      // Ensure emergency latch is cleared first
-      MqttRealtimeClient.instance.sendCommand(
-        userId: uid,
-        serialNumber: sNum,
-        command: 'RESET_EMERGENCY',
-      );
+    // Fire MQTT command immediately (non-blocking)
+    final sNum = MqttRealtimeClient.instance.activeOnlineSerial ?? state.serialNumber ?? 'SP-CTRL-69E0';
+    final uid = _ref?.read(authProvider).userId;
 
-      // Fast dispatch PUMP_START via MQTT directly to physical relay
-      await MqttRealtimeClient.instance.sendCommand(
-        userId: uid,
-        serialNumber: sNum,
-        command: 'PUMP_START',
-      );
+    // Clear emergency latch (fire-and-forget)
+    MqttRealtimeClient.instance.sendCommand(
+      userId: uid,
+      serialNumber: sNum,
+      command: 'RESET_EMERGENCY',
+    );
 
-      final hwId = state.hardwareId;
-      if (hwId != null && hwId.isNotEmpty) {
-        await _apiClient.postWithFallback('/api/hardware/$hwId/pump/start', {});
-      }
-      state = state.copyWith(
-        isStarting: false,
-        isRunning: true,
-        motorRpm: 2850,
-        powerWatts: 1120.0,
-        flowRateLpm: 26.5,
-      );
-    } catch (e) {
-      state = state.copyWith(isStarting: false);
-      rethrow;
+    // Dispatch PUMP_START via MQTT directly to physical relay (fire-and-forget)
+    MqttRealtimeClient.instance.sendCommand(
+      userId: uid,
+      serialNumber: sNum,
+      command: 'PUMP_START',
+    );
+
+    // REST fallback in background — do NOT await (keeps UI at <100ms)
+    final hwId = state.hardwareId;
+    if (hwId != null && hwId.isNotEmpty) {
+      _apiClient.postWithFallback('/api/hardware/$hwId/pump/start', {}).catchError((_) {});
     }
   }
 
@@ -576,33 +579,31 @@ class PumpNotifier extends StateNotifier<PumpState> {
     if (state.mode == PumpMode.auto) return;
 
     _lastManualCommandTime = DateTime.now();
-    state = state.copyWith(isStopping: true);
 
-    try {
-      final sNum = MqttRealtimeClient.instance.activeOnlineSerial ?? state.serialNumber ?? 'SP-CTRL-69E0';
-      final uid = _ref?.read(authProvider).userId;
+    // INSTANT optimistic state update (<10ms) — no waiting for network
+    state = state.copyWith(
+      isStopping: false,
+      isRunning: false,
+      flowRateLpm: 0.0,
+      motorRpm: 0,
+      powerWatts: 0.0,
+    );
 
-      // Fast dispatch PUMP_STOP via MQTT directly to physical relay
-      await MqttRealtimeClient.instance.sendCommand(
-        userId: uid,
-        serialNumber: sNum,
-        command: 'PUMP_STOP',
-      );
+    // Fire MQTT command immediately (non-blocking)
+    final sNum = MqttRealtimeClient.instance.activeOnlineSerial ?? state.serialNumber ?? 'SP-CTRL-69E0';
+    final uid = _ref?.read(authProvider).userId;
 
-      final hwId = state.hardwareId;
-      if (hwId != null && hwId.isNotEmpty) {
-        await _apiClient.postWithFallback('/api/hardware/$hwId/pump/stop', {});
-      }
-      state = state.copyWith(
-        isStopping: false,
-        isRunning: false,
-        flowRateLpm: 0.0,
-        motorRpm: 0,
-        powerWatts: 0.0,
-      );
-    } catch (e) {
-      state = state.copyWith(isStopping: false);
-      rethrow;
+    // Dispatch PUMP_STOP via MQTT directly to physical relay (fire-and-forget)
+    MqttRealtimeClient.instance.sendCommand(
+      userId: uid,
+      serialNumber: sNum,
+      command: 'PUMP_STOP',
+    );
+
+    // REST fallback in background — do NOT await (keeps UI at <100ms)
+    final hwId = state.hardwareId;
+    if (hwId != null && hwId.isNotEmpty) {
+      _apiClient.postWithFallback('/api/hardware/$hwId/pump/stop', {}).catchError((_) {});
     }
   }
 

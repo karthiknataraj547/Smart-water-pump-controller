@@ -542,14 +542,14 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                                 width: double.infinity,
                                 padding: const EdgeInsets.symmetric(vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: (pump.isOnline && pump.hasRealData)
+                                  color: (pump.isOnline && pump.isSubNodeOnline)
                                       ? AppColors.emeraldSuccess.withValues(alpha: 0.15)
                                       : (pump.isOnline
                                           ? const Color(0xFFF59E0B).withValues(alpha: 0.15)
                                           : const Color(0xFFEF4444).withValues(alpha: 0.15)),
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
-                                    color: (pump.isOnline && pump.hasRealData)
+                                    color: (pump.isOnline && pump.isSubNodeOnline)
                                         ? AppColors.emeraldSuccess.withValues(alpha: 0.4)
                                         : (pump.isOnline
                                             ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
@@ -563,7 +563,7 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                                       width: 6,
                                       height: 6,
                                       decoration: BoxDecoration(
-                                        color: (pump.isOnline && pump.hasRealData)
+                                        color: (pump.isOnline && pump.isSubNodeOnline)
                                             ? AppColors.emeraldSuccess
                                             : (pump.isOnline ? const Color(0xFFF59E0B) : const Color(0xFFEF4444)),
                                         shape: BoxShape.circle,
@@ -571,13 +571,13 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      (pump.isOnline && pump.hasRealData)
+                                      (pump.isOnline && pump.isSubNodeOnline)
                                           ? 'ONLINE'
-                                          : (pump.isOnline ? 'STANDBY' : 'OFFLINE'),
+                                          : (pump.isOnline ? 'AWAITING POD' : 'OFFLINE'),
                                       style: GoogleFonts.plusJakartaSans(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
-                                        color: (pump.isOnline && pump.hasRealData)
+                                        color: (pump.isOnline && pump.isSubNodeOnline)
                                             ? AppColors.emeraldSuccess
                                             : (pump.isOnline ? const Color(0xFFF59E0B) : const Color(0xFFEF4444)),
                                         letterSpacing: 0.5,
@@ -648,12 +648,12 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                           style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w800, color: textSec, letterSpacing: 0.8),
                         ),
                         const SizedBox(height: 10),
-                        _DiagRow(label: 'Chip Model', value: 'HydroCore Dual-Core (240MHz)', textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'Wi-Fi Network', value: 'Home_WiFi_5G (-54 dBm)', textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'MQTT Broker', value: 'Mosquitto 2.0 (TLS Active)', isAccent: true, textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'Pump Relay Pin', value: 'GPIO 26 (Contactor Energized)', textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'Firmware Revision', value: 'v1.2.4 (Latest OTA Build)', textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'Gateway Uptime', value: '4 days, 12 hrs, 40 mins', textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Chip Model', value: 'ESP32-WROOM-32E (240MHz)', textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Wi-Fi Network', value: pump.isOnline ? 'Connected (${pump.wifiRssi} dBm)' : 'Disconnected', textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'MQTT Broker', value: pump.isOnline ? 'broker.emqx.io (Active)' : 'Not Connected', isAccent: pump.isOnline, textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Pump Relay Pin', value: 'GPIO 26 (${pump.isRunning ? "Energized" : "De-energized"})', textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Device Serial', value: pump.serialNumber ?? 'Unknown', textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Device Status', value: pump.isOnline ? 'ONLINE' : 'OFFLINE', isSuccess: pump.isOnline, textSec: textSec, textPrim: textPrim),
 
                         const SizedBox(height: 16),
                         Divider(color: borderCol),
@@ -665,11 +665,11 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                           style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w800, color: textSec, letterSpacing: 0.8),
                         ),
                         const SizedBox(height: 10),
-                        _DiagRow(label: 'Chip Model', value: 'AquaSense Ultra-Low-Power', textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'Mesh Protocol', value: 'Direct Wireless RF Mesh (2ms Latency)', isAccent: true, textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'Battery Pack', value: '87% (3.92V Li-ion Cell)', isSuccess: true, textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'RSSI Signal', value: '-62 dBm (Excellent Coverage)', textSec: textSec, textPrim: textPrim),
-                        _DiagRow(label: 'Packet Reliability', value: '99.98% (Zero Retransmissions)', textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Chip Model', value: 'ESP32-C3 Ultra-Low-Power', textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Mesh Protocol', value: pump.isSubNodeOnline ? 'ESP-NOW Direct (Active)' : 'ESP-NOW (Awaiting)', isAccent: pump.isSubNodeOnline, textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Connection', value: pump.isSubNodeOnline ? 'Paired & Receiving' : 'Awaiting ESP-NOW Sensor Pod', isSuccess: pump.isSubNodeOnline, textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Sensor Data', value: pump.isSubNodeOnline ? 'Live Telemetry Active' : 'No Data — Pod Disconnected', textSec: textSec, textPrim: textPrim),
+                        _DiagRow(label: 'Tank Level', value: pump.isSubNodeOnline ? '${pump.tankLevelPct.toStringAsFixed(1)}%' : '--', textSec: textSec, textPrim: textPrim),
 
                         const SizedBox(height: 18),
                         Divider(color: borderCol),
@@ -779,7 +779,7 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
-                        '3 Active',
+                        pump.isSubNodeOnline ? '3 Active' : (pump.isOnline ? '0 Active' : 'Offline'),
                         style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.cyanPrimary),
                       ),
                     ),
@@ -791,7 +791,7 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                   name: 'Ultrasonic Water Level',
                   model: 'JSN-SR04T Waterproof',
                   status: pump.isOnline
-                      ? (pump.hasRealData ? 'Active • ${pump.tankLevelPct.toStringAsFixed(1)}%' : 'Awaiting sensor ping')
+                      ? (pump.isSubNodeOnline ? 'Active • ${pump.tankLevelPct.toStringAsFixed(1)}%' : 'Awaiting Sensor Pod')
                       : 'Sensor Offline',
                   pin: 'D5 / D6',
                   isDark: isDark,
@@ -813,7 +813,7 @@ class _HardwareScreenState extends ConsumerState<HardwareScreen> {
                   name: 'Analog TDS Purity Probe',
                   model: 'Total Dissolved Solids Sensor',
                   status: pump.isOnline
-                      ? (pump.hasRealData ? 'Calibrated • ${pump.tdsPpm} PPM' : 'Awaiting reading')
+                      ? (pump.isSubNodeOnline ? 'Calibrated • ${pump.tdsPpm} PPM' : 'Awaiting Sensor Pod')
                       : 'Sensor Offline',
                   pin: 'A0 ADC',
                   isDark: isDark,
