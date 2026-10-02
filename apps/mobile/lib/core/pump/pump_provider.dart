@@ -302,10 +302,10 @@ class PumpNotifier extends StateNotifier<PumpState> {
     MqttRealtimeClient.instance.onStatusUpdate = (serial, online) {
       final activeSerial = (serial.isNotEmpty && !serial.contains('+') && !serial.contains('#'))
           ? serial
-          : (state.serialNumber ?? 'SP-CTRL-69E0');
+          : (state.serialNumber ?? 'SP-CTRL-0000');
 
       state = state.copyWith(
-        isOnline: online,
+        isOnline: online || MqttRealtimeClient.instance.isAnyDeviceOnline,
         serialNumber: online ? activeSerial : state.serialNumber,
       );
     };
@@ -314,7 +314,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
     MqttRealtimeClient.instance.onHeartbeatUpdate = (serial, data) {
       final activeSerial = (serial.isNotEmpty && !serial.contains('+') && !serial.contains('#'))
           ? serial
-          : (state.serialNumber ?? 'SP-CTRL-69E0');
+          : (state.serialNumber ?? 'SP-CTRL-0000');
 
       final pState = (data['pumpState'] as String?)?.toUpperCase();
       final isRunning = pState == 'ON';
@@ -370,7 +370,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
     MqttRealtimeClient.instance.onTelemetryUpdate = (serial, data) {
       final activeSerial = (serial.isNotEmpty && !serial.contains('+') && !serial.contains('#'))
           ? serial
-          : (state.serialNumber ?? 'SP-CTRL-69E0');
+          : (state.serialNumber ?? 'SP-CTRL-0000');
 
       final level = (data['tankLevelPct'] as num?)?.toDouble() ?? state.tankLevelPct;
       final vol = (data['waterVolumeLiters'] as num?)?.toDouble() ?? state.waterVolumeLiters;
@@ -397,7 +397,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
     MqttRealtimeClient.instance.onAckUpdate = (serial, data) {
       final activeSerial = (serial.isNotEmpty && !serial.contains('+') && !serial.contains('#'))
           ? serial
-          : (state.serialNumber ?? 'SP-CTRL-69E0');
+          : (state.serialNumber ?? 'SP-CTRL-0000');
       final pState = (data['pumpState'] as String?)?.toUpperCase();
       final isRunning = pState == 'ON';
       final status = data['status'] as String?;
@@ -415,8 +415,10 @@ class PumpNotifier extends StateNotifier<PumpState> {
       }
     };
 
-    // Start connecting to EMQX MQTT broker
-    MqttRealtimeClient.instance.initialize();
+    // Initialize MQTT broker connection and sync remote broker config
+    MqttRealtimeClient.instance.initialize().then((_) {
+      MqttRealtimeClient.instance.autoDetectConfig(_apiClient);
+    });
   }
 
   @override
@@ -435,16 +437,21 @@ class PumpNotifier extends StateNotifier<PumpState> {
         final sNum = hw['serialNumber'] as String?;
         final hwName = hw['name'] as String?;
         final activeMqttSerial = MqttRealtimeClient.instance.activeOnlineSerial;
-        final effectiveSerial = activeMqttSerial ?? sNum ?? state.serialNumber ?? 'SP-CTRL-69E0';
-        final hasMqttStatus = MqttRealtimeClient.instance.hasReceivedStatusFor(effectiveSerial);
+        final effectiveSerial = activeMqttSerial ?? sNum ?? state.serialNumber ?? 'SP-CTRL-0000';
         final isMqttOnline = MqttRealtimeClient.instance.isDeviceOnline(effectiveSerial);
+        final isAnyMqttOnline = MqttRealtimeClient.instance.isAnyDeviceOnline;
+        final hasRecentMqtt = MqttRealtimeClient.instance.hasRecentHeartbeat;
 
-        // Real-time MQTT has ground truth directly from physical hardware on broker.emqx.io
+        // Ground-truth online status:
+        // Priority 1: Direct live MQTT from ESP32/EMQX (real-time telemetry/heartbeat)
+        // Priority 2: REST backend reports online or recent heartbeat (<75s)
         final bool isOnline;
-        if (hasMqttStatus) {
-          isOnline = isMqttOnline;
+        if (isMqttOnline || isAnyMqttOnline || hasRecentMqtt) {
+          isOnline = true;
         } else {
-          isOnline = hw['isOnline'] == true && hw['status'] == 'ONLINE';
+          final lastHb = hw['lastHeartbeat'] != null ? DateTime.tryParse(hw['lastHeartbeat'].toString()) : null;
+          final isRestRecentlyActive = lastHb != null && DateTime.now().difference(lastHb).inSeconds < 75;
+          isOnline = (hw['isOnline'] == true && hw['status'] == 'ONLINE') || isRestRecentlyActive;
         }
         final isEmergency = hw['emergencyStopActive'] == true || hw['status'] == 'EMERGENCY_LOCKED';
         final pState = hw['pumpState'] as Map<String, dynamic>?;
@@ -488,7 +495,7 @@ class PumpNotifier extends StateNotifier<PumpState> {
 
         state = state.copyWith(
           hardwareId: hwId,
-          serialNumber: activeMqttSerial ?? sNum ?? state.serialNumber,
+          serialNumber: activeMqttSerial ?? sNum ?? state.serialNumber ?? 'SP-CTRL-0000',
           hardwareName: hwName,
           isOnline: isOnline,
           isEmergencyStopped: isEmergency,

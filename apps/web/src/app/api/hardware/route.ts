@@ -58,11 +58,11 @@ export async function GET(req: NextRequest) {
     } catch (_) {}
   }
 
-  // Return ground-truth online status: only online if actively seen in the last 20 seconds
+  // Return ground-truth online status: online if actively seen in the last 75 seconds
   const now = Date.now();
   const formatted = (hardwareList || []).map((hw: any) => {
     const lastHb = hw.lastHeartbeat ? new Date(hw.lastHeartbeat).getTime() : 0;
-    const isRecentlyActive = (now - lastHb) < 20000;
+    const isOnline = lastHb > 0 && (now - lastHb) < 75000;
     const isPumpRunning = hw.pumpState?.state === 'ON';
     const capacity = hw.tankCapacityLiters || 1000;
     const latestSensorReading = hw.latestSensorReading || {

@@ -78,6 +78,8 @@ char wifiSsid[64] = "";
 char wifiPassword[64] = "";
 char mqttServer[64] = "broker.emqx.io";
 int mqttPort = 1883;
+char mqttUser[64] = "";
+char mqttPass[64] = "";
 
 // Wi-Fi Connection & Status LED State
 bool isWifiConnecting = false;
@@ -293,11 +295,22 @@ bool connectMqtt() {
     char lwtTopic[128];
     snprintf(lwtTopic, sizeof(lwtTopic), "users/%s/devices/%s/status", uid, serialNumber);
 
-    if (mqttClient.connect(clientId, lwtTopic, 1, true, "OFFLINE")) {
-        Serial.printf("[MQTT] Connected to broker. Device isolated to user: %s\n", uid);
+    char directLwtTopic[128];
+    snprintf(directLwtTopic, sizeof(directLwtTopic), "devices/%s/status", serialNumber);
 
-        // Publish birth message
+    bool connected = false;
+    if (strlen(mqttUser) > 0) {
+        connected = mqttClient.connect(clientId, mqttUser, mqttPass, lwtTopic, 1, true, "OFFLINE");
+    } else {
+        connected = mqttClient.connect(clientId, lwtTopic, 1, true, "OFFLINE");
+    }
+
+    if (connected) {
+        Serial.printf("[MQTT] Connected to broker: %s:%d. User: %s\n", mqttServer, mqttPort, uid);
+
+        // Publish birth message to both scoped and direct topics
         mqttClient.publish(lwtTopic, "ONLINE", true);
+        mqttClient.publish(directLwtTopic, "ONLINE", true);
 
         // Subscribe strictly to user's commands topic: users/{userId}/devices/{serialNumber}/command
         char cmdTopic[128];
@@ -612,17 +625,32 @@ void setup() {
     Serial.printf("[Boot] Hardware Serial: %s (MAC: %02X:%02X:%02X:%02X:%02X:%02X)\n",
         serialNumber, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    // Load stored Wi-Fi, user ID, and Tank parameters from NVS
+    // Load stored Wi-Fi, user ID, MQTT config and Tank parameters from NVS
     prefs.begin("smartpump", true);
     String savedSsid = prefs.getString("wifi_ssid", "");
     String savedPass = prefs.getString("wifi_pass", "");
     String savedUser = prefs.getString("user_id", "");
+    String savedMqttServer = prefs.getString("mqtt_server", "broker.emqx.io");
+    int savedMqttPort = prefs.getInt("mqtt_port", 1883);
+    String savedMqttUser = prefs.getString("mqtt_user", "");
+    String savedMqttPass = prefs.getString("mqtt_pass", "");
     String savedTankType = prefs.getString("tank_type", "Overhead Plastic (Sintex)");
     tankCapacityLiters = prefs.getInt("tank_cap", 1000);
     tankDepthCm = prefs.getInt("tank_depth", 150);
     sensorOffsetCm = prefs.getInt("sensor_offset", 15);
     motorHp = prefs.getFloat("motor_hp", 1.0);
     prefs.end();
+
+    if (savedMqttServer.length() > 0) {
+        strncpy(mqttServer, savedMqttServer.c_str(), sizeof(mqttServer));
+        mqttPort = savedMqttPort;
+    }
+    if (savedMqttUser.length() > 0) {
+        strncpy(mqttUser, savedMqttUser.c_str(), sizeof(mqttUser));
+    }
+    if (savedMqttPass.length() > 0) {
+        strncpy(mqttPass, savedMqttPass.c_str(), sizeof(mqttPass));
+    }
 
     if (savedSsid.length() > 0) {
         strncpy(wifiSsid, savedSsid.c_str(), sizeof(wifiSsid));

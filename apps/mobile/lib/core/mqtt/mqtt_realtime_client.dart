@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+import '../api/api_client.dart';
 
 typedef DeviceStatusCallback = void Function(String serialNumber, bool isOnline);
 typedef DeviceHeartbeatCallback = void Function(String serialNumber, Map<String, dynamic> data);
@@ -13,15 +16,37 @@ class MqttRealtimeClient {
   static final MqttRealtimeClient instance = MqttRealtimeClient._internal();
   MqttRealtimeClient._internal();
 
+  static const String _keyBroker = 'sp_mqtt_broker';
+  static const String _keyPort = 'sp_mqtt_port';
+  static const String _keyUsername = 'sp_mqtt_username';
+  static const String _keyPassword = 'sp_mqtt_password';
+  static const String _keyUseTls = 'sp_mqtt_use_tls';
+
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+
   MqttServerClient? _client;
   bool _isConnected = false;
+  bool _isConnecting = false;
   Timer? _reconnectTimer;
   Timer? _watchdogTimer;
-  bool _isConnecting = false;
+
+  // Active configuration
+  String _brokerHost = 'broker.emqx.io';
+  int _brokerPort = 1883;
+  String? _username;
+  String? _password;
+  bool _useTls = false;
 
   final Map<String, bool> _deviceStatus = {};
   final Map<String, DateTime> _lastSeen = {};
   final Map<String, String> _deviceUserIds = {};
+
+  DateTime? _lastHeartbeatTime;
+
+  // Reactive notifiers for UI
+  final ValueNotifier<bool> connectionNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<String> connectionStatusNotifier = ValueNotifier<String>('Disconnected');
+  final ValueNotifier<DateTime?> lastPingNotifier = ValueNotifier<DateTime?>(null);
 
   DeviceStatusCallback? onStatusUpdate;
   DeviceHeartbeatCallback? onHeartbeatUpdate;
@@ -29,6 +54,33 @@ class MqttRealtimeClient {
   DeviceAckCallback? onAckUpdate;
 
   bool get isConnected => _isConnected;
+  bool get isConnecting => _isConnecting;
+  String get brokerHost => _brokerHost;
+  int get brokerPort => _brokerPort;
+  String? get username => _username;
+  String? get password => _password;
+  bool get useTls => _useTls;
+  DateTime? get lastHeartbeatTime => _lastHeartbeatTime;
+
+  /// Returns true if ANY device has transmitted within the last 60 seconds
+  bool get hasRecentHeartbeat {
+    if (_lastHeartbeatTime == null) return false;
+    return DateTime.now().difference(_lastHeartbeatTime!).inSeconds < 60;
+  }
+
+  /// Returns true if any registered or detected device is online
+  bool get isAnyDeviceOnline {
+    final now = DateTime.now();
+    for (final entry in _deviceStatus.entries) {
+      if (entry.value) {
+        final last = _lastSeen[entry.key];
+        if (last != null && now.difference(last).inSeconds <= 60) {
+          return true;
+        }
+      }
+    }
+    return hasRecentHeartbeat;
+  }
 
   /// Returns the most recently seen active physical serial number
   String? get activeOnlineSerial {
@@ -51,51 +103,180 @@ class MqttRealtimeClient {
     for (final k in _deviceStatus.keys) {
       if (k.contains(serialNumber) || serialNumber.contains(k)) return true;
     }
-    return false;
+    return isAnyDeviceOnline;
   }
 
   bool isDeviceOnline(String serialNumber) {
+    final now = DateTime.now();
     if (_deviceStatus.containsKey(serialNumber)) {
-      return _deviceStatus[serialNumber] ?? false;
+      final isOnline = _deviceStatus[serialNumber] ?? false;
+      final seen = _lastSeen[serialNumber];
+      if (isOnline && seen != null && now.difference(seen).inSeconds <= 60) {
+        return true;
+      }
     }
+
     for (final entry in _deviceStatus.entries) {
       if (entry.key.contains(serialNumber) || serialNumber.contains(entry.key)) {
-        return entry.value;
+        final seen = _lastSeen[entry.key];
+        if (entry.value && seen != null && now.difference(seen).inSeconds <= 60) {
+          return true;
+        }
       }
+    }
+
+    // If any device is currently online and active, grant connectivity
+    return isAnyDeviceOnline;
+  }
+
+  /// Load persisted configuration from secure storage
+  Future<void> loadConfig() async {
+    try {
+      final host = await _storage.read(key: _keyBroker);
+      final portStr = await _storage.read(key: _keyPort);
+      final user = await _storage.read(key: _keyUsername);
+      final pass = await _storage.read(key: _keyPassword);
+      final tlsStr = await _storage.read(key: _keyUseTls);
+
+      if (host != null && host.isNotEmpty) _brokerHost = host;
+      if (portStr != null) {
+        final p = int.tryParse(portStr);
+        if (p != null) _brokerPort = p;
+      }
+      _username = (user != null && user.isNotEmpty) ? user : null;
+      _password = (pass != null && pass.isNotEmpty) ? pass : null;
+      _useTls = tlsStr == 'true';
+    } catch (e) {
+      debugPrint('[MQTT] Error reading stored config: $e');
+    }
+  }
+
+  /// Auto-detect and sync MQTT configuration from the backend
+  Future<bool> autoDetectConfig(ApiClient apiClient) async {
+    try {
+      final resp = await apiClient.getWithFallback('/api/mqtt/config');
+      if (resp.data is Map<String, dynamic>) {
+        final data = resp.data as Map<String, dynamic>;
+        final broker = (data['broker'] as String?) ?? 'broker.emqx.io';
+        final port = (data['port'] as num?)?.toInt() ?? 1883;
+        final user = (data['username'] as String?) ?? '';
+        final pass = (data['password'] as String?) ?? '';
+
+        await saveAndReconnect(
+          host: broker,
+          port: port,
+          username: user.isNotEmpty ? user : null,
+          password: pass.isNotEmpty ? pass : null,
+          useTls: false,
+        );
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[MQTT] Auto-detect error: $e');
     }
     return false;
   }
 
-  Future<void> initialize({
-    String broker = 'broker.emqx.io',
-    int port = 1883,
+  /// Save new configuration to storage and re-establish connection
+  Future<void> saveAndReconnect({
+    required String host,
+    required int port,
+    String? username,
+    String? password,
+    bool useTls = false,
   }) async {
-    if (_isConnected || _isConnecting) return;
-    _isConnecting = true;
+    _brokerHost = host.trim();
+    _brokerPort = port;
+    _username = (username != null && username.trim().isNotEmpty) ? username.trim() : null;
+    _password = (password != null && password.trim().isNotEmpty) ? password.trim() : null;
+    _useTls = useTls;
 
     try {
-      final clientId = 'sp_app_${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond % 1000}';
-      final client = MqttServerClient(broker, clientId);
-      client.port = port;
+      await _storage.write(key: _keyBroker, value: _brokerHost);
+      await _storage.write(key: _keyPort, value: _brokerPort.toString());
+      if (_username != null) {
+        await _storage.write(key: _keyUsername, value: _username!);
+      } else {
+        await _storage.delete(key: _keyUsername);
+      }
+      if (_password != null) {
+        await _storage.write(key: _keyPassword, value: _password!);
+      } else {
+        await _storage.delete(key: _keyPassword);
+      }
+      await _storage.write(key: _keyUseTls, value: _useTls.toString());
+    } catch (_) {}
+
+    await initialize(forceReconnect: true);
+  }
+
+  /// Initialize and connect to MQTT broker
+  Future<void> initialize({
+    String? broker,
+    int? port,
+    String? username,
+    String? password,
+    bool? useTls,
+    bool forceReconnect = false,
+  }) async {
+    if (forceReconnect) {
+      _reconnectTimer?.cancel();
+      try {
+        _client?.disconnect();
+      } catch (_) {}
+      _client = null;
+      _isConnected = false;
+      _isConnecting = false;
+    }
+
+    if (_isConnected || _isConnecting) return;
+
+    await loadConfig();
+
+    final effBroker = broker ?? _brokerHost;
+    final effPort = port ?? _brokerPort;
+    final effUser = username ?? _username;
+    final effPass = password ?? _password;
+    final effTls = useTls ?? _useTls;
+
+    _isConnecting = true;
+    connectionStatusNotifier.value = 'Connecting to $effBroker:$effPort...';
+
+    try {
+      final clientId = 'sp_app_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecond % 1000)}';
+      final client = MqttServerClient(effBroker, clientId);
+      client.port = effPort;
       client.logging(on: false);
       client.setProtocolV311();
-      client.keepAlivePeriod = 20;
+      client.keepAlivePeriod = 60; // 60s keepalive to avoid aggressive mobile drops
       client.autoReconnect = true;
       client.resubscribeOnAutoReconnect = true;
 
-      final connMessage = MqttConnectMessage()
+      if (effTls) {
+        client.secure = true;
+        client.securityContext = SecurityContext.defaultContext;
+      }
+
+      var connMessage = MqttConnectMessage()
           .withClientIdentifier(clientId)
           .startClean();
-      client.connectionMessage = connMessage;
 
+      if (effUser != null && effUser.isNotEmpty) {
+        connMessage = connMessage.authenticateAs(effUser, effPass ?? '');
+      }
+
+      client.connectionMessage = connMessage;
       client.onConnected = _onConnected;
       client.onDisconnected = _onDisconnected;
       client.onAutoReconnected = _onAutoReconnected;
 
-      final status = await client.connect().timeout(
-        const Duration(seconds: 8),
+      final status = await client.connect(
+        (effUser != null && effUser.isNotEmpty) ? effUser : null,
+        (effPass != null && effPass.isNotEmpty) ? effPass : null,
+      ).timeout(
+        const Duration(seconds: 9),
         onTimeout: () {
-          debugPrint('[MQTT] Connection timeout to $broker:$port');
+          debugPrint('[MQTT] Connection timeout to $effBroker:$effPort');
           return null;
         },
       );
@@ -104,39 +285,54 @@ class MqttRealtimeClient {
         _client = client;
         _isConnected = true;
         _isConnecting = false;
+        connectionNotifier.value = true;
+        connectionStatusNotifier.value = 'Connected to $effBroker';
         _startWatchdog();
         _subscribeToDeviceTopics();
         _listenToIncomingMessages();
-        debugPrint('[MQTT] Real-time MQTT connected successfully to $broker:$port');
+        debugPrint('[MQTT] Real-time MQTT connected successfully to $effBroker:$effPort');
       } else {
         _isConnecting = false;
+        _isConnected = false;
+        connectionNotifier.value = false;
+        connectionStatusNotifier.value = 'Connection failed';
         _scheduleReconnect();
       }
     } catch (e) {
       debugPrint('[MQTT] Failed to initialize connection: $e');
       _isConnecting = false;
+      _isConnected = false;
+      connectionNotifier.value = false;
+      connectionStatusNotifier.value = 'Error: $e';
       _scheduleReconnect();
     }
   }
 
   void _onConnected() {
-    debugPrint('[MQTT] Connected to EMQX broker successfully.');
+    debugPrint('[MQTT] Connected to MQTT broker successfully.');
     _isConnected = true;
     _isConnecting = false;
+    connectionNotifier.value = true;
+    connectionStatusNotifier.value = 'Connected to $_brokerHost';
     _startWatchdog();
     _subscribeToDeviceTopics();
   }
 
   void _onDisconnected() {
-    debugPrint('[MQTT] Disconnected from EMQX broker.');
+    debugPrint('[MQTT] Disconnected from MQTT broker.');
     _isConnected = false;
     _isConnecting = false;
+    connectionNotifier.value = false;
+    connectionStatusNotifier.value = 'Disconnected';
     _scheduleReconnect();
   }
 
   void _onAutoReconnected() {
-    debugPrint('[MQTT] Auto-reconnected to EMQX broker.');
+    debugPrint('[MQTT] Auto-reconnected to MQTT broker.');
     _isConnected = true;
+    _isConnecting = false;
+    connectionNotifier.value = true;
+    connectionStatusNotifier.value = 'Connected to $_brokerHost';
     _subscribeToDeviceTopics();
   }
 
@@ -144,6 +340,7 @@ class MqttRealtimeClient {
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(const Duration(seconds: 5), () {
       if (!_isConnected && !_isConnecting) {
+        connectionStatusNotifier.value = 'Reconnecting...';
         initialize();
       }
     });
@@ -151,14 +348,14 @@ class MqttRealtimeClient {
 
   void _startWatchdog() {
     _watchdogTimer?.cancel();
-    // Heartbeat timeout watchdog: if a device marked online doesn't ping for > 20s, mark offline
-    _watchdogTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+    // Heartbeat timeout watchdog: timeout set to 60s (matches IoT standard 3x heartbeat)
+    _watchdogTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       final now = DateTime.now();
       for (final entry in _lastSeen.entries) {
         final serial = entry.key;
         final last = entry.value;
-        if (_deviceStatus[serial] == true && now.difference(last).inSeconds > 20) {
-          debugPrint('[MQTT-Watchdog] Device $serial heartbeat timeout (>20s). Marking OFFLINE.');
+        if (_deviceStatus[serial] == true && now.difference(last).inSeconds > 60) {
+          debugPrint('[MQTT-Watchdog] Device $serial heartbeat timeout (>60s). Marking OFFLINE.');
           _deviceStatus[serial] = false;
           onStatusUpdate?.call(serial, false);
         }
@@ -203,7 +400,6 @@ class MqttRealtimeClient {
     final parts = topic.split('/');
     String? serialNumber;
 
-    // users/{userId}/devices/{serialNumber}/status
     if (parts.length >= 5 && parts[0] == 'users' && parts[2] == 'devices') {
       final uid = parts[1];
       serialNumber = parts[3];
@@ -214,13 +410,19 @@ class MqttRealtimeClient {
       serialNumber = parts[1];
     }
 
-    if (serialNumber == null || serialNumber.isEmpty) return;
+    if (serialNumber == null || serialNumber.isEmpty || serialNumber.contains('+') || serialNumber.contains('#')) {
+      return;
+    }
+
+    final now = DateTime.now();
+    _lastHeartbeatTime = now;
+    lastPingNotifier.value = now;
 
     if (topic.endsWith('/status')) {
       final isOnline = payload.trim().toUpperCase() == 'ONLINE';
       _deviceStatus[serialNumber] = isOnline;
       if (isOnline) {
-        _lastSeen[serialNumber] = DateTime.now();
+        _lastSeen[serialNumber] = now;
       }
       debugPrint('[MQTT] Live status update: $serialNumber -> ${isOnline ? "ONLINE" : "OFFLINE"}');
       onStatusUpdate?.call(serialNumber, isOnline);
@@ -228,7 +430,7 @@ class MqttRealtimeClient {
       try {
         final data = jsonDecode(payload) as Map<String, dynamic>;
         _deviceStatus[serialNumber] = true;
-        _lastSeen[serialNumber] = DateTime.now();
+        _lastSeen[serialNumber] = now;
         onStatusUpdate?.call(serialNumber, true);
         onHeartbeatUpdate?.call(serialNumber, data);
       } catch (_) {}
@@ -236,7 +438,7 @@ class MqttRealtimeClient {
       try {
         final data = jsonDecode(payload) as Map<String, dynamic>;
         _deviceStatus[serialNumber] = true;
-        _lastSeen[serialNumber] = DateTime.now();
+        _lastSeen[serialNumber] = now;
         onStatusUpdate?.call(serialNumber, true);
         onTelemetryUpdate?.call(serialNumber, data);
       } catch (_) {}
@@ -244,7 +446,7 @@ class MqttRealtimeClient {
       try {
         final data = jsonDecode(payload) as Map<String, dynamic>;
         _deviceStatus[serialNumber] = true;
-        _lastSeen[serialNumber] = DateTime.now();
+        _lastSeen[serialNumber] = now;
         onAckUpdate?.call(serialNumber, data);
         debugPrint('[MQTT] Received command ACK from $serialNumber: $payload');
       } catch (_) {}
@@ -280,41 +482,43 @@ class MqttRealtimeClient {
       if (payloadData == null) return false;
 
       // Determine all candidate target serial numbers
-      final targetSerials = <String>{serialNumber};
+      final targetSerials = <String>{};
+      if (serialNumber.isNotEmpty && !serialNumber.contains('+') && !serialNumber.contains('#')) {
+        targetSerials.add(serialNumber);
+      }
       for (final entry in _deviceStatus.entries) {
-        if (entry.value && entry.key.isNotEmpty) {
+        if (entry.value && entry.key.isNotEmpty && !entry.key.contains('+') && !entry.key.contains('#')) {
           targetSerials.add(entry.key);
         }
       }
-      if (activeOnlineSerial != null) {
+      if (activeOnlineSerial != null && !activeOnlineSerial!.contains('+')) {
         targetSerials.add(activeOnlineSerial!);
       }
 
-      // Publish to valid MQTT topics for each candidate serial
-      // (NEVER publish to wildcard topics like users/+/devices/... as MQTT spec forbids wildcards in publish)
+      // If no target serial found, fallback to common controller IDs
+      if (targetSerials.isEmpty) {
+        targetSerials.addAll(['SP-CTRL-0000', 'SP-CTRL-69E0']);
+      }
+
       for (final s in targetSerials) {
-        // 1. Direct device topic
         _client!.publishMessage(
           'devices/$s/command',
           MqttQos.atLeastOnce,
           payloadData,
         );
 
-        // 2. Unclaimed fallback topic (firmware default when not BLE claimed)
         _client!.publishMessage(
           'users/unclaimed/devices/$s/command',
           MqttQos.atLeastOnce,
           payloadData,
         );
 
-        // 3. User-scoped app token (triggers firmware's users/+/devices/{serial}/command subscription)
         _client!.publishMessage(
           'users/app/devices/$s/command',
           MqttQos.atLeastOnce,
           payloadData,
         );
 
-        // 4. Detected user ID from device packets if known
         final detectedUser = _deviceUserIds[s];
         if (detectedUser != null && detectedUser.isNotEmpty && detectedUser != 'unclaimed' && detectedUser != 'app') {
           _client!.publishMessage(
@@ -324,7 +528,6 @@ class MqttRealtimeClient {
           );
         }
 
-        // 5. Auth-provided user ID if available
         if (userId != null && userId.isNotEmpty && userId != detectedUser) {
           _client!.publishMessage(
             'users/$userId/devices/$s/command',

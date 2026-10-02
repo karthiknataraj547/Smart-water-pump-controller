@@ -7,6 +7,9 @@ import '../../../core/auth/auth_provider.dart';
 import '../../../core/pump/pump_provider.dart';
 import '../../provisioning/presentation/ble_provisioning_dialog.dart';
 
+import '../../../core/mqtt/mqtt_realtime_client.dart';
+import '../../../core/api/api_client.dart';
+
 class SettingsScreen extends ConsumerWidget {
   final Function(int)? onNavigateTab;
 
@@ -93,50 +96,10 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showMqttDialog(BuildContext context, bool isDark) {
-    final bgSurface = isDark ? AppColors.darkSurface : AppColors.lightSurface;
-    final textPrim = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
-    final textSec = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
-
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: Row(
-          children: [
-            const Icon(Icons.cloud_sync_rounded, color: AppColors.cyanPrimary),
-            const SizedBox(width: 10),
-            Text('MQTT Broker Settings', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 16)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Broker Host: broker.emqx.io / mqtt.smartpump.io', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, color: textPrim)),
-            const SizedBox(height: 4),
-            Text('Port: 8883 (TLS Mutual Authentication)', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec)),
-            Text('Keep Alive: 60s ping heartbeat', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec)),
-            Text('QoS Level: 1 (Guaranteed Delivery)', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec)),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.emeraldSuccess.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text('● TLS Handshake Active', style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.emeraldSuccess)),
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.cyanPrimary),
-            child: Text('Save & Close', style: GoogleFonts.plusJakartaSans(color: Colors.black, fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
+      barrierDismissible: true,
+      builder: (ctx) => _MqttConfigurationDialog(isDark: isDark),
     );
   }
 
@@ -374,15 +337,20 @@ class SettingsScreen extends ConsumerWidget {
                   },
                 ),
                 Divider(height: 1, color: borderCol),
-                _SettingsTile(
-                  icon: Icons.cloud_sync_rounded,
-                  iconColor: const Color(0xFF3B82F6),
-                  title: 'MQTT & Network Broker',
-                  subtitle: 'broker.emqx.io:8883 (TLS Encrypted)',
-                  isDark: isDark,
-                  textPrim: textPrim,
-                  textSec: textSec,
-                  onTap: () => _showMqttDialog(context, isDark),
+                ValueListenableBuilder<bool>(
+                  valueListenable: MqttRealtimeClient.instance.connectionNotifier,
+                  builder: (context, isMqttConn, _) {
+                    return _SettingsTile(
+                      icon: Icons.cloud_sync_rounded,
+                      iconColor: isMqttConn ? AppColors.emeraldSuccess : const Color(0xFF3B82F6),
+                      title: 'MQTT & Network Broker',
+                      subtitle: '${MqttRealtimeClient.instance.brokerHost}:${MqttRealtimeClient.instance.brokerPort} • ${isMqttConn ? "Live Connected" : "Tap to configure"}',
+                      isDark: isDark,
+                      textPrim: textPrim,
+                      textSec: textSec,
+                      onTap: () => _showMqttDialog(context, isDark),
+                    );
+                  },
                 ),
               ],
             ),
@@ -672,3 +640,418 @@ class _NotificationItem extends StatelessWidget {
     );
   }
 }
+
+class _MqttConfigurationDialog extends StatefulWidget {
+  final bool isDark;
+  const _MqttConfigurationDialog({required this.isDark});
+
+  @override
+  State<_MqttConfigurationDialog> createState() => _MqttConfigurationDialogState();
+}
+
+class _MqttConfigurationDialogState extends State<_MqttConfigurationDialog> {
+  late final TextEditingController _hostCtrl;
+  late final TextEditingController _portCtrl;
+  late final TextEditingController _userCtrl;
+  late final TextEditingController _passCtrl;
+  late bool _useTls;
+  bool _isSaving = false;
+  bool _isSyncing = false;
+  bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final client = MqttRealtimeClient.instance;
+    _hostCtrl = TextEditingController(text: client.brokerHost);
+    _portCtrl = TextEditingController(text: client.brokerPort.toString());
+    _userCtrl = TextEditingController(text: client.username ?? '');
+    _passCtrl = TextEditingController(text: client.password ?? '');
+    _useTls = client.useTls;
+  }
+
+  @override
+  void dispose() {
+    _hostCtrl.dispose();
+    _portCtrl.dispose();
+    _userCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleSave() async {
+    setState(() => _isSaving = true);
+    final host = _hostCtrl.text.trim().isEmpty ? 'broker.emqx.io' : _hostCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text.trim()) ?? (_useTls ? 8883 : 1883);
+    final user = _userCtrl.text.trim().isEmpty ? null : _userCtrl.text.trim();
+    final pass = _passCtrl.text.trim().isEmpty ? null : _passCtrl.text.trim();
+
+    await MqttRealtimeClient.instance.saveAndReconnect(
+      host: host,
+      port: port,
+      username: user,
+      password: pass,
+      useTls: _useTls,
+    );
+
+    if (mounted) {
+      setState(() => _isSaving = false);
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'MQTT connection settings saved! Reconnecting...',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+          ),
+          backgroundColor: AppColors.emeraldSuccess,
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleAutoSync() async {
+    setState(() => _isSyncing = true);
+    final client = MqttRealtimeClient.instance;
+    final success = await client.autoDetectConfig(defaultApiClient);
+    if (mounted) {
+      setState(() {
+        _isSyncing = false;
+        _hostCtrl.text = client.brokerHost;
+        _portCtrl.text = client.brokerPort.toString();
+        _userCtrl.text = client.username ?? '';
+        _passCtrl.text = client.password ?? '';
+        _useTls = client.useTls;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? 'MQTT broker settings auto-synchronized from server!'
+                : 'Server config endpoint unreachable. Keeping current settings.',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+          ),
+          backgroundColor: success ? AppColors.emeraldSuccess : const Color(0xFFF59E0B),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final bgSurface = isDark ? AppColors.darkSurface : AppColors.lightSurface;
+    final textPrim = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+    final textSec = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+    final borderCol = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final client = MqttRealtimeClient.instance;
+
+    return Dialog(
+      backgroundColor: bgSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.cloud_sync_rounded, color: Color(0xFF3B82F6), size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'MQTT Broker & Auth',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                            color: textPrim,
+                          ),
+                        ),
+                        Text(
+                          'Real-time IoT connection configuration',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            color: textSec,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: client.connectionNotifier,
+                    builder: (context, isConn, _) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isConn
+                              ? AppColors.emeraldSuccess.withValues(alpha: 0.15)
+                              : AppColors.crimsonError.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isConn
+                                ? AppColors.emeraldSuccess.withValues(alpha: 0.4)
+                                : AppColors.crimsonError.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                color: isConn ? AppColors.emeraldSuccess : AppColors.crimsonError,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              isConn ? 'Connected' : 'Offline',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: isConn ? AppColors.emeraldSuccess : AppColors.crimsonError,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Live Diagnostics Banner
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: borderCol),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.sensors_rounded, size: 15, color: AppColors.cyanPrimary),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Hardware Telemetry Stream',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: textPrim,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ValueListenableBuilder<DateTime?>(
+                      valueListenable: client.lastPingNotifier,
+                      builder: (context, lastPing, _) {
+                        final activeSerial = client.activeOnlineSerial ?? 'SP-CTRL-0000';
+                        final pingAgo = lastPing != null
+                            ? '${DateTime.now().difference(lastPing).inSeconds}s ago'
+                            : 'Waiting for heartbeat packet';
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Node: $activeSerial',
+                              style: GoogleFonts.jetBrainsMono(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: textSec,
+                              ),
+                            ),
+                            Text(
+                              'Ping: $pingAgo',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 11,
+                                color: lastPing != null ? AppColors.emeraldSuccess : textSec,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Broker Host & Port
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextField(
+                      controller: _hostCtrl,
+                      style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textPrim),
+                      decoration: InputDecoration(
+                        labelText: 'Broker Host / IP',
+                        labelStyle: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
+                        hintText: 'broker.emqx.io',
+                        prefixIcon: const Icon(Icons.dns_rounded, size: 18),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      controller: _portCtrl,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textPrim),
+                      decoration: InputDecoration(
+                        labelText: 'Port',
+                        labelStyle: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
+                        hintText: '1883',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Username
+              TextField(
+                controller: _userCtrl,
+                style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textPrim),
+                decoration: InputDecoration(
+                  labelText: 'MQTT Username (Optional)',
+                  labelStyle: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
+                  hintText: 'Leave empty for public broker',
+                  prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Password
+              TextField(
+                controller: _passCtrl,
+                obscureText: _obscurePassword,
+                style: GoogleFonts.plusJakartaSans(fontSize: 13, color: textPrim),
+                decoration: InputDecoration(
+                  labelText: 'MQTT Password (Optional)',
+                  labelStyle: GoogleFonts.plusJakartaSans(fontSize: 12, color: textSec),
+                  hintText: 'Leave empty for public broker',
+                  prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                      size: 18,
+                    ),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // TLS Toggle
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: borderCol),
+                ),
+                child: SwitchListTile(
+                  title: Text(
+                    'Enable TLS / SSL Encryption',
+                    style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: textPrim),
+                  ),
+                  subtitle: Text(
+                    _useTls ? 'Connecting securely (Port 8883 default)' : 'Standard unencrypted TCP (Port 1883)',
+                    style: GoogleFonts.plusJakartaSans(fontSize: 11, color: textSec),
+                  ),
+                  value: _useTls,
+                  activeThumbColor: AppColors.cyanPrimary,
+                  onChanged: (val) {
+                    setState(() {
+                      _useTls = val;
+                      if (val && _portCtrl.text == '1883') {
+                        _portCtrl.text = '8883';
+                      } else if (!val && _portCtrl.text == '8883') {
+                        _portCtrl.text = '1883';
+                      }
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Actions
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _isSyncing ? null : _handleAutoSync,
+                    icon: _isSyncing
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.sync_rounded, size: 16),
+                    label: Text(
+                      'Auto-Sync',
+                      style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text('Cancel', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _isSaving ? null : _handleSave,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.cyanPrimary,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: _isSaving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                          )
+                        : Text(
+                            'Save & Connect',
+                            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 13),
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

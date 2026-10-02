@@ -60,10 +60,22 @@ function resolveDataStorePath(): string {
 export class PersistentDataStore {
   private filePath: string;
   private data: PersistentDatabaseSchema;
+  private lastLoadedMtime: number = 0;
 
   constructor() {
     this.filePath = resolveDataStorePath();
     this.data = this.load();
+  }
+
+  public ensureFresh() {
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const stat = fs.statSync(this.filePath);
+        if (stat.mtimeMs > this.lastLoadedMtime) {
+          this.data = this.load();
+        }
+      }
+    } catch (_) {}
   }
 
   private load(): PersistentDatabaseSchema {
@@ -71,6 +83,7 @@ export class PersistentDataStore {
       // 1. Try primary path
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf8');
+        this.lastLoadedMtime = fs.statSync(this.filePath).mtimeMs;
         return JSON.parse(raw);
       }
       // 2. Check alternative Next.js server bundle path if exists
@@ -265,6 +278,7 @@ export class PersistentDataStore {
   // --- HARDWARE ---
   readonly hardware = {
     findUnique: async (args: { where: { id?: string; serialNumber?: string; macAddress?: string }; include?: any }) => {
+      this.ensureFresh();
       const hardwares = Object.values(this.data.hardware);
       let match: any = null;
       if (args.where.id) match = this.data.hardware[args.where.id];
@@ -276,6 +290,7 @@ export class PersistentDataStore {
     },
 
     findFirst: async (args: { where: { id?: string; userId?: string; serialNumber?: string }; include?: any }) => {
+      this.ensureFresh();
       const hardwares = Object.values(this.data.hardware);
       const match: any = hardwares.find((h: any) => {
         for (const [k, v] of Object.entries(args.where)) {
@@ -288,6 +303,7 @@ export class PersistentDataStore {
     },
 
     findMany: async (args: { where?: { userId?: string }; include?: any; orderBy?: any }) => {
+      this.ensureFresh();
       let list = Object.values(this.data.hardware);
       if (args.where?.userId) {
         list = list.filter((h: any) => h.userId === args.where?.userId);
